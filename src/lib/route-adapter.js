@@ -26,7 +26,23 @@ export async function handleRequest(req, { params }, controllerFn, options = {})
   // Mock res object
   let statusCode = 200;
   let responseData = null;
-  let headers = {};
+  let headers = {
+    "Access-Control-Allow-Credentials": "true",
+  };
+
+  // 🛠️ Proactively set CORS headers in route-adapter to ensure failure responses have them
+  const allowedOrigins = [
+    "http://localhost:5173",
+    "https://magicscale-frontend.vercel.app",
+    "https://www.magicscale-frontend.vercel.app"
+  ];
+  const origin = req.headers.get("origin");
+  if (origin) {
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    if (allowedOrigins.some(ao => ao.replace(/\/$/, "") === normalizedOrigin)) {
+      headers["Access-Control-Allow-Origin"] = origin;
+    }
+  }
 
   const res = {
     status: (code) => {
@@ -60,24 +76,37 @@ export async function handleRequest(req, { params }, controllerFn, options = {})
         // Handle file upload (simplified version of multer)
         const fileEntry = formData.get(options.fileField || "image") || formData.get("coverImage") || formData.get("aadharCard") || formData.get("panCard") || formData.get("profilePhoto");
         if (fileEntry && typeof fileEntry !== 'string') {
-          const bytes = await fileEntry.arrayBuffer();
-          const buffer = Buffer.from(bytes);
-          
-          const uploadsDir = path.join(process.cwd(), 'public/uploads');
-          await mkdir(uploadsDir, { recursive: true });
-          
-          const fileName = `${Date.now()}-${fileEntry.name.replace(/\s+/g, '_')}`;
-          const filePath = path.join(uploadsDir, fileName);
-          await writeFile(filePath, buffer);
-          
-          file = {
-            path: `/uploads/${fileName}`,
-            originalname: fileEntry.name,
-            filename: fileName,
-            mimetype: fileEntry.type,
-            size: fileEntry.size
-          };
-          console.log("File uploaded successfully:", file.path);
+          try {
+            const bytes = await fileEntry.arrayBuffer();
+            const buffer = Buffer.from(bytes);
+            
+            const uploadsDir = path.join(process.cwd(), 'public/uploads');
+            await mkdir(uploadsDir, { recursive: true });
+            
+            const fileName = `${Date.now()}-${fileEntry.name.replace(/\s+/g, '_')}`;
+            const filePath = path.join(uploadsDir, fileName);
+            await writeFile(filePath, buffer);
+            
+            file = {
+              path: `/uploads/${fileName}`,
+              originalname: fileEntry.name,
+              filename: fileName,
+              mimetype: fileEntry.type,
+              size: fileEntry.size
+            };
+            console.log("File uploaded successfully:", file.path);
+          } catch (writeErr) {
+            console.error("❌ File System Write Failed (Likely Vercel Read-Only):", writeErr.message);
+            // On Vercel, we can't write to public/uploads. 
+            // In a real app, this should go to Cloudinary/S3.
+            // For now, we'll keep the file entry in memory if needed, 
+            // or just log that it failed but let the request continue without the file.
+            file = {
+              error: "FileSystem is read-only. Persistent storage (Cloudinary/S3) required.",
+              originalname: fileEntry.name,
+              mimetype: fileEntry.type
+            };
+          }
         }
       } catch (formErr) {
         console.error("Error parsing multipart form data:", formErr);
@@ -146,8 +175,14 @@ export async function handleRequest(req, { params }, controllerFn, options = {})
   } catch (error) {
     console.error("❌ API Execution Error:", error.message);
     return Response.json(
-      { message: error.message || "Internal Server Error" }, 
-      { status: error.message.includes("timed out") ? 504 : 500 }
+      { 
+        message: error.message || "Internal Server Error",
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }, 
+      { 
+        status: error.message.includes("timed out") ? 504 : 500,
+        headers // 👈 Crucial: include gathered headers (CORS) in error response
+      }
     );
   }
 }

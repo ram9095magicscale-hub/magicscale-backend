@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export function middleware(request) {
   // Get the origin from the request headers
-  const origin = request.headers.get("origin");
+  const origin = request.headers.get("origin") || "";
 
   // Define allowed origins
   const allowedOrigins = [
@@ -12,7 +12,9 @@ export function middleware(request) {
   ];
 
   // Check if the request origin is in the allowed list
-  const isAllowedOrigin = allowedOrigins.includes(origin);
+  // Normalize origin for comparison (remove trailing slash if any)
+  const normalizedOrigin = origin.replace(/\/$/, "");
+  const isAllowedOrigin = allowedOrigins.some(ao => ao.replace(/\/$/, "") === normalizedOrigin);
 
   // Handle preflight (OPTIONS) requests
   if (request.method === "OPTIONS") {
@@ -34,9 +36,6 @@ export function middleware(request) {
 
   if (isAllowedOrigin) {
     response.headers.set("Access-Control-Allow-Origin", origin);
-  } else if (!origin) {
-    // If no origin (e.g. same-origin or non-browser request), still allow
-    // But don't set Allow-Origin * here as we want to be safe
   }
 
   response.headers.set("Access-Control-Allow-Credentials", "true");

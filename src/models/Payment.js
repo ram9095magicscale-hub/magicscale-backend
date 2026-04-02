@@ -12,6 +12,4 @@ const paymentSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
 });
 
-const Payment = mongoose.model("Payment", paymentSchema);
-
-export default Payment;
+export default mongoose.models.Payment || mongoose.model("Payment", paymentSchema);

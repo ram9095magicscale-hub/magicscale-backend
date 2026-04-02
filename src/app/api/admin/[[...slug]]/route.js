@@ -30,6 +30,10 @@ export async function GET(req, { params }) {
     return handleRequest(req, { params }, adminController.getAllTransactions, { middlewares: [verifyAdminOrSeller] });
   }
 
+  if (action === "stats") {
+    return handleRequest(req, { params }, adminController.getAdminStats, { middlewares: [verifyAdminOrSeller] });
+  }
+
   return Response.json({ message: "Not Found" }, { status: 404 });
 }
 

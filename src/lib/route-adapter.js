@@ -33,8 +33,11 @@ export async function handleRequest(req, { params }, controllerFn, options = {})
   // 🛠️ Proactively set CORS headers in route-adapter to ensure failure responses have them
   const allowedOrigins = [
     "http://localhost:5173",
+    "http://localhost:3000",
     "https://magicscale-frontend.vercel.app",
-    "https://www.magicscale-frontend.vercel.app"
+    "https://www.magicscale-frontend.vercel.app",
+    "https://www.magicscale.in",
+    "https://magicscale.in"
   ];
   const origin = req.headers.get("origin");
   if (origin) {

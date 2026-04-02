@@ -47,6 +47,7 @@ export async function handleRequest(req, { params }, controllerFn, options = {})
     }
   }
 
+  let responseSent = false;
   const res = {
     status: (code) => {
       statusCode = code;
@@ -54,10 +55,18 @@ export async function handleRequest(req, { params }, controllerFn, options = {})
     },
     json: (data) => {
       responseData = data;
+      responseSent = true;
+      if (res.resolveMiddleware) res.resolveMiddleware();
       return res;
     },
     setHeader: (name, value) => {
       headers[name] = value;
+      return res;
+    },
+    // Required for some middlewares that might use end()
+    end: () => {
+      responseSent = true;
+      if (res.resolveMiddleware) res.resolveMiddleware();
       return res;
     }
   };
@@ -146,18 +155,27 @@ export async function handleRequest(req, { params }, controllerFn, options = {})
         
         await new Promise((resolve, reject) => {
           const timeout = setTimeout(() => reject(new Error("Middleware execution timed out")), 10000);
+          res.resolveMiddleware = resolve; // Allow res.json() to resolve this promise
           
           try {
             middleware(mockReq, res, (err) => {
               clearTimeout(timeout);
+              res.resolveMiddleware = null;
               if (err) reject(err);
               else resolve();
             });
           } catch (err) {
             clearTimeout(timeout);
+            res.resolveMiddleware = null;
             reject(err);
           }
         });
+
+        // If middleware already sent a response, don't proceed to next middleware or controller
+        if (responseSent) {
+          console.log("-> Middleware sent response, skipping controller");
+          return Response.json(responseData, { status: statusCode, headers });
+        }
       }
     }
 

@@ -1,5 +1,8 @@
 // controllers/userController.js
 import User from '@/models/User.js';
+import Payment from '@/models/Payment.js';
+import Subscription from '@/models/Subscription.js';
+
 
 // Fetch logged-in user's profile
 export const getUserProfile = async (req, res) => {
@@ -121,7 +124,8 @@ export const updateUserProfile = async (req, res) => {
 
 
 
-import Subscription from '@/models/Subscription.js';
+
+
 
 // Controller to get subscriptions for the logged-in user
 export const getUserSubscriptions = async (req, res) => {
@@ -136,8 +140,11 @@ export const getUserSubscriptions = async (req, res) => {
 
 export const getUserOrders = async (req, res) => {
   try {
-    res.status(200).json([]); // Currently no Order model, returning empty list
+    const orders = await Payment.find({ user: req.user.id }).sort({ timestamp: -1 });
+    res.status(200).json(orders);
   } catch (error) {
+    console.error("Error fetching user orders:", error);
     res.status(500).json({ message: "Failed to fetch orders" });
   }
 };
+

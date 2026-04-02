@@ -1,5 +1,7 @@
 import * as userController from "@/controllers/userController";
+import * as adminController from "@/controllers/adminController";
 import AuthConfig from "@/models/AuthConfig";
+
 import { handleRequest } from "@/lib/route-adapter";
 import { verifyAdminOrSeller } from "@/middleware/authMiddleware";
 
@@ -22,6 +24,10 @@ export async function GET(req, { params }) {
 
   if (action === "users") {
     return handleRequest(req, { params }, userController.getAllUsers, { middlewares: [verifyAdminOrSeller] });
+  }
+
+  if (action === "transactions") {
+    return handleRequest(req, { params }, adminController.getAllTransactions, { middlewares: [verifyAdminOrSeller] });
   }
 
   return Response.json({ message: "Not Found" }, { status: 404 });

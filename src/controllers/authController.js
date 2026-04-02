@@ -291,19 +291,7 @@ export const register = async (req, res) => {
       if (user.isVerified) {
         return res.status(400).json({ message: 'User already exists. Please login.' });
       } else {
-        user.otp = otp;
-        user.otpExpiresAt = otpExpiresAt;
-        user.password = await bcrypt.hash(password, 10);
-        await user.save();
-
-        try {
-          await sendOTP(email, otp);
-        } catch (emailErr) {
-          console.error('❌ Email send error (resend):', emailErr.message);
-          return res.status(500).json({ message: 'Failed to send OTP email. Check your email configuration.' });
-        }
-
-        return res.status(200).json({ message: 'OTP resent. Please verify your email.', userId: user._id });
+        return res.status(400).json({ message: 'Email already registered. Please verify your account or login.' });
       }
     }
 

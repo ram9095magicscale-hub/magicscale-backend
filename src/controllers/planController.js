@@ -125,6 +125,54 @@ export const getPlan = async (req, res) => {
             "Competitor Analysis",
             "Advanced Growth Hacks"
           ]
+        },
+        "fssai-registration-1yr": {
+          name: "FSSAI Registration (1 Year)",
+          slug: "fssai-registration-1yr",
+          price: 1500,
+          features: ["Basic Application Prep", "Dedicated Filing Support", "1 Year License Validity"]
+        },
+        "fssai-registration-3yrs": {
+          name: "FSSAI Registration (3 Years)",
+          slug: "fssai-registration-3yrs",
+          price: 2000,
+          features: ["Basic Application Prep", "Priority Filing Support", "3 Year License Validity"]
+        },
+        "fssai-registration-5yrs": {
+          name: "FSSAI Registration (5 Years)",
+          slug: "fssai-registration-5yrs",
+          price: 3000,
+          features: ["Basic Application Prep", "Dedicated Filing Agent", "5 Year License Validity"]
+        },
+        "fssai-state-license": {
+          name: "FSSAI State License",
+          slug: "fssai-state-license",
+          price: 4999,
+          features: ["Complete Application Prep", "State License Processing", "Priority Govt Liaison"]
+        },
+        "fssai-tatkal-license": {
+          name: "FSSAI Tatkal Fast-Track",
+          slug: "fssai-tatkal-license",
+          price: 999,
+          features: ["Express Application Prep", "1 Year License Validity", "24h Priority Filing"]
+        },
+        "fssai-renewal-1yr": {
+          name: "FSSAI Renewal (1 Year)",
+          slug: "fssai-renewal-1yr",
+          price: 1, // 👈 Kept at 1 for user testing as seen in FssaiCoursePage.jsx
+          features: ["FSSAI Renewal Filing", "1 Year License Validity", "Cloud Documentation"]
+        },
+        "fssai-renewal-3yrs": {
+          name: "FSSAI Renewal (3 Years)",
+          slug: "fssai-renewal-3yrs",
+          price: 1200,
+          features: ["FSSAI Renewal Filing", "3 Year License Validity", "Priority Support"]
+        },
+        "fssai-renewal-5yrs": {
+          name: "FSSAI Renewal (5 Years)",
+          slug: "fssai-renewal-5yrs",
+          price: 2000,
+          features: ["FSSAI Renewal Filing", "5 Year License Validity", "Compliance Management"]
         }
       };
 

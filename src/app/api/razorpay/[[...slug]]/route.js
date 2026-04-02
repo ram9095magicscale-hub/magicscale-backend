@@ -1,8 +1,12 @@
 import Razorpay from "razorpay";
+import mongoose from "mongoose";
+
 import crypto from "crypto";
 import User from "@/models/User";
 import Payment from "@/models/Payment";
+import Subscription from "@/models/Subscription";
 import { sendPaymentEmails } from "@/utils/email";
+
 import { handleRequest } from "@/lib/route-adapter";
 
 const razorpay = new Razorpay({
@@ -85,34 +89,57 @@ export async function POST(req, { params }) {
 
       if (expectedSignature === razorpay_signature) {
         try {
-          // 1. Create Payment Record
+          // 1. Create Payment Record (Always)
           await Payment.create({
-            user: userId,
+            user: mongoose.Types.ObjectId.isValid(userId) ? userId : null,
             plan,
-            duration,
+            duration: duration || 1,
             amount,
             orderId: razorpay_order_id,
             status: "paid",
             timestamp: new Date(),
           });
 
-          // 2. Update User Subscription
-          if (userId) {
+          // 2. Create/Update Subscription & User (Only if userId is valid)
+          if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+            console.log("-> Valid userId found. Linking subscription...");
+            const startDate = new Date();
+            const endDate = new Date(startDate);
+            endDate.setMonth(endDate.getMonth() + (duration || 1));
+
+            const planModel = await mongoose.models.Plan?.findOne({ slug: plan.toLowerCase() });
+
+            await Subscription.create({
+              userId,
+              planName: plan,
+              amount,
+              duration: duration || 1,
+              status: "Active",
+              startDate,
+              endDate,
+              planId: planModel ? planModel._id : new mongoose.Types.ObjectId("64e3c98f9a72b0c2a5d2e1b0") 
+            });
+
+            // 3. Update User model (legacy support)
             await User.findByIdAndUpdate(userId, {
               subscription: {
                 plan,
-                duration,
-                expiresAt: new Date(Date.now() + duration * 30 * 24 * 60 * 60 * 1000),
+                duration: duration || 1,
+                expiresAt: endDate,
               },
             });
+          } else {
+            console.warn("-> Guest checkout or invalid userId. Skipping user-linked updates.");
           }
 
-          // 3. Send Success Emails
-          await sendPaymentEmails({ name, email, plan, duration, amount, orderId: razorpay_order_id });
+          // 4. Send Success Emails (Always if email exists)
+          if (email) {
+            await sendPaymentEmails({ name, email, plan, duration: duration || 1, amount, orderId: razorpay_order_id });
+          }
 
           res.json({ success: true, message: "Payment verified successfully" });
         } catch (dbError) {
-          console.error("Database Update Error after payment:", dbError);
+          console.error("Database Update Error after payment (Non-fatal):", dbError);
           res.status(500).json({ success: false, message: "Payment verified but database update failed" });
         }
       } else {

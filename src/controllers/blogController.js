@@ -39,12 +39,6 @@ export const updateBlog = async (req, res) => {
     }
     const blog = await Blog.findByIdAndUpdate(req.params.id, blogData, { new: true });
     
-    // ✅ Trigger Newsletter on Update as well
-    const subscribers = await NewsletterSubscriber.find({ active: true });
-    if (subscribers.length > 0) {
-      sendNewsletterEmail(subscribers, blog).catch(err => console.error("❌ Newsletter update failed:", err));
-    }
-
     res.status(200).json(blog);
   } catch (error) {
     res.status(500).json({ message: 'Error updating blog' });

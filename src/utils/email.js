@@ -169,28 +169,72 @@ export const sendPaymentEmails = async ({ name, email, plan, duration, amount, o
   return results;
 };
 
-// ✅ New: Send Newsletter Email for Blog Update
+// ✅ New: Send Welcome Email for Newsletter
+export const sendWelcomeEmail = async (email) => {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: '🎉 Welcome to MagicScale Insights!',
+    html: `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eef2f6; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
+        <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 40px 20px; text-align: center; color: white;">
+          <h1 style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">MagicScale</h1>
+          <p style="margin-top: 10px; opacity: 0.9; font-size: 16px;">Empowering India's Foodpreneurs</p>
+        </div>
+        <div style="padding: 40px; background: white;">
+          <h2 style="color: #1e293b; font-size: 22px; margin-bottom: 20px;">You're officially on the list! 🚀</h2>
+          <p style="color: #475569; line-height: 1.7; font-size: 16px;">
+            Hi there,<br/><br/>
+            Thanks for joining the MagicScale community! You've just taken a great step toward staying ahead in the food tech industry.
+          </p>
+          <div style="background: #f8fafc; border-radius: 12px; padding: 25px; margin: 30px 0;">
+            <p style="margin: 0; color: #475569; font-size: 15px; line-height: 1.6;">
+              <strong>What to expect?</strong><br/>
+              Expert tips on Swiggy/Zomato growth, legal compliance guides, and exclusive insights from top Indian food business owners.
+            </p>
+          </div>
+          <div style="text-align: center;">
+            <a href="https://magicscale.in/services" style="display: inline-block; background: #4f46e5; color: white; padding: 14px 30px; text-decoration: none; border-radius: 10px; font-weight: bold; transition: all 0.3s ease;">Explore Our Services</a>
+          </div>
+        </div>
+        <div style="background: #f1f5f9; padding: 25px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+          <p style="margin-bottom: 10px;">© 2024 MagicScale. All rights reserved.</p>
+          <p>You received this because you subscribed to the MagicScale Newsletter.</p>
+          <p><a href="https://magicscale.in/unsubscribe?email=${email}" style="color: #4f46e5; font-weight: 600;">Unsubscribe</a></p>
+        </div>
+      </div>
+    `,
+  };
+  const info = await transporter.sendMail(mailOptions);
+  console.log('✅ Welcome email sent:', info.response);
+  return info;
+};
+
+// ✅ Refined: Send Newsletter Email for Blog Update
 export const sendNewsletterEmail = async (subscribers, blog) => {
   const mailPromises = subscribers.map(subscriber => {
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: subscriber.email,
-      subject: `📚 New Blog Post: ${blog.title} - MagicScale`,
+      subject: `📚 New Insight: ${blog.title} - MagicScale`,
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 10px; overflow: hidden;">
-          <div style="background: #4f46e5; padding: 20px; text-align: center; color: white;">
-            <h1 style="margin: 0;">MagicScale Insights</h1>
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eef2f6; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
+          <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 30px 20px; text-align: center; color: white;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">MagicScale Insights</h1>
           </div>
-          <div style="padding: 30px;">
-            <h2 style="color: #333;">${blog.title}</h2>
-            <p style="color: #666; line-height: 1.6;">${blog.summary || blog.content.substring(0, 150) + '...'}</p>
-            <div style="margin-top: 30px; text-align: center;">
-              <a href="https://magicscale.in/blogs/${blog._id}" style="background: #4f46e5; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">Read Full Article</a>
+          <div style="padding: 40px; background: white;">
+            <h2 style="color: #1e293b; font-size: 22px; margin-bottom: 15px; line-height: 1.3;">${blog.title}</h2>
+            <p style="color: #475569; line-height: 1.7; font-size: 16px; margin-bottom: 25px;">
+              ${blog.summary || (blog.content && blog.content.substring(0, 150)) || 'Check out our latest update for foodpreneurs...'}
+            </p>
+            <div style="text-align: center; margin-top: 35px;">
+              <a href="https://magicscale.in/blogs/${blog._id}" style="display: inline-block; background: #4f46e5; color: white; padding: 14px 35px; text-decoration: none; border-radius: 10px; font-weight: bold; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">Read Full Article</a>
             </div>
           </div>
-          <div style="background: #f9fafb; padding: 20px; text-align: center; font-size: 12px; color: #999;">
+          <div style="background: #f1f5f9; padding: 25px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+            <p style="margin-bottom: 10px;">Stay ahead of the competition. Follow the data.</p>
             <p>You received this because you subscribed to the MagicScale Newsletter.</p>
-            <p><a href="http://localhost:5173/unsubscribe?email=${subscriber.email}" style="color: #4f46e5;">Unsubscribe</a></p>
+            <p><a href="https://magicscale.in/unsubscribe?email=${subscriber.email}" style="color: #4f46e5; font-weight: 600;">Unsubscribe</a></p>
           </div>
         </div>
       `,

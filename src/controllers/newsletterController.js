@@ -1,4 +1,5 @@
 import NewsletterSubscriber from '@/models/NewsletterSubscriber.js';
+import { sendWelcomeEmail } from '@/utils/email.js';
 
 export const subscribe = async (req, res) => {
   try {
@@ -15,11 +16,19 @@ export const subscribe = async (req, res) => {
       } else {
         existing.active = true;
         await existing.save();
+
+        // ✅ Send Welcome Email on reactivation too
+        sendWelcomeEmail(email).catch(err => console.error("❌ Welcome email reactivation failed:", err));
+
         return res.status(200).json({ message: 'Subscription reactivated!' });
       }
     }
 
     await NewsletterSubscriber.create({ email });
+    
+    // ✅ Send Welcome Email
+    sendWelcomeEmail(email).catch(err => console.error("❌ Welcome email failed:", err));
+
     res.status(201).json({ message: 'Successfully subscribed to newsletter!' });
   } catch (error) {
     console.error("Newsletter Error:", error);

@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 
 const paymentSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  name: { type: String }, // Store guest name
   email: { type: String }, // Store for guest linking
   phone: { type: String }, // Store for guest linking
   plan: { type: String, required: true },

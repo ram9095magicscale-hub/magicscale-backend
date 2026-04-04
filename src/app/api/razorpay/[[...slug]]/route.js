@@ -89,10 +89,13 @@ export async function POST(req, { params }) {
 
       if (expectedSignature === razorpay_signature) {
         try {
+          const normalizedEmail = email ? email.toLowerCase().trim() : "";
+
           // 1. Create Payment Record (Always)
           await Payment.create({
             user: mongoose.Types.ObjectId.isValid(userId) ? userId : null,
-            email,
+            name, // Captured from req.body
+            email: normalizedEmail,
             phone: req.body.phone,
             plan,
             duration: duration || 1,
@@ -111,7 +114,8 @@ export async function POST(req, { params }) {
 
           await Subscription.create({
             userId: mongoose.Types.ObjectId.isValid(userId) ? userId : null,
-            email,
+            name, // Captured from req.body
+            email: normalizedEmail,
             phone: req.body.phone,
             planName: plan,
             amount,

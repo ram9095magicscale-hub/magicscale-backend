@@ -278,21 +278,21 @@ import { generateToken } from '@/utils/token.js';
 // Helper to link guest payments/subscriptions to a user account
 const linkGuestRecords = async (user) => {
   try {
-    const email = user.email;
+    const normalizedEmail = user.email ? user.email.toLowerCase().trim() : "";
     const userId = user._id;
 
     // 1. Link Payments
     const updatedPayments = await Payment.updateMany(
-      { email, user: { $in: [null, undefined] } },
+      { email: normalizedEmail, user: { $in: [null, undefined] } },
       { $set: { user: userId } }
     );
     if (updatedPayments.modifiedCount > 0) {
-      console.log(`Linked ${updatedPayments.modifiedCount} payments to user ${email}`);
+      console.log(`Linked ${updatedPayments.modifiedCount} payments to user ${normalizedEmail}`);
     }
 
     // 2. Link Subscriptions
     const updatedSubs = await Subscription.updateMany(
-      { email, userId: { $in: [null, undefined] } },
+      { email: normalizedEmail, userId: { $in: [null, undefined] } },
       { $set: { userId: userId } }
     );
     if (updatedSubs.modifiedCount > 0) {

@@ -7,6 +7,7 @@ const subscriptionSchema = new mongoose.Schema({
     ref: 'User',
     required: false // Optional for guest checkout
   },
+  name: { type: String }, // Store guest name
   email: { type: String }, // Store for guest linking
   phone: { type: String }, // Store for guest linking
   planId: {

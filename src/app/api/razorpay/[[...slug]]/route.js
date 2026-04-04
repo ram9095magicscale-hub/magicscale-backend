@@ -92,6 +92,8 @@ export async function POST(req, { params }) {
           // 1. Create Payment Record (Always)
           await Payment.create({
             user: mongoose.Types.ObjectId.isValid(userId) ? userId : null,
+            email,
+            phone: req.body.phone,
             plan,
             duration: duration || 1,
             amount,
@@ -100,27 +102,28 @@ export async function POST(req, { params }) {
             timestamp: new Date(),
           });
 
-          // 2. Create/Update Subscription & User (Only if userId is valid)
+          // 2. Create/Update Subscription
+          const startDate = new Date();
+          const endDate = new Date(startDate);
+          endDate.setMonth(endDate.getMonth() + (duration || 1));
+
+          const planModel = await mongoose.models.Plan?.findOne({ slug: plan.toLowerCase() });
+
+          await Subscription.create({
+            userId: mongoose.Types.ObjectId.isValid(userId) ? userId : null,
+            email,
+            phone: req.body.phone,
+            planName: plan,
+            amount,
+            duration: duration || 1,
+            status: "Active",
+            startDate,
+            endDate,
+            planId: planModel ? planModel._id : new mongoose.Types.ObjectId("64e3c98f9a72b0c2a5d2e1b0") 
+          });
+
+          // 3. Update User model (legacy support)
           if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-            console.log("-> Valid userId found. Linking subscription...");
-            const startDate = new Date();
-            const endDate = new Date(startDate);
-            endDate.setMonth(endDate.getMonth() + (duration || 1));
-
-            const planModel = await mongoose.models.Plan?.findOne({ slug: plan.toLowerCase() });
-
-            await Subscription.create({
-              userId,
-              planName: plan,
-              amount,
-              duration: duration || 1,
-              status: "Active",
-              startDate,
-              endDate,
-              planId: planModel ? planModel._id : new mongoose.Types.ObjectId("64e3c98f9a72b0c2a5d2e1b0") 
-            });
-
-            // 3. Update User model (legacy support)
             await User.findByIdAndUpdate(userId, {
               subscription: {
                 plan,
@@ -128,8 +131,6 @@ export async function POST(req, { params }) {
                 expiresAt: endDate,
               },
             });
-          } else {
-            console.warn("-> Guest checkout or invalid userId. Skipping user-linked updates.");
           }
 
           // 4. Send Success Emails (Always if email exists)

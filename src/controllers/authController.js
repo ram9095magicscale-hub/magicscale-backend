@@ -268,10 +268,52 @@
 
 
 import User from '@/models/User.js';
+import Payment from '@/models/Payment.js';
+import Subscription from '@/models/Subscription.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { sendOTP, sendResetEmail } from '@/utils/email.js';
 import { generateToken } from '@/utils/token.js';
+
+// Helper to link guest payments/subscriptions to a user account
+const linkGuestRecords = async (user) => {
+  try {
+    const email = user.email;
+    const userId = user._id;
+
+    // 1. Link Payments
+    const updatedPayments = await Payment.updateMany(
+      { email, user: { $in: [null, undefined] } },
+      { $set: { user: userId } }
+    );
+    if (updatedPayments.modifiedCount > 0) {
+      console.log(`Linked ${updatedPayments.modifiedCount} payments to user ${email}`);
+    }
+
+    // 2. Link Subscriptions
+    const updatedSubs = await Subscription.updateMany(
+      { email, userId: { $in: [null, undefined] } },
+      { $set: { userId: userId } }
+    );
+    if (updatedSubs.modifiedCount > 0) {
+      console.log(`Linked ${updatedSubs.modifiedCount} subscriptions to user ${email}`);
+      
+      // Update User model with the latest subscription if needed
+      const latestSub = await Subscription.findOne({ userId }).sort({ endDate: -1 });
+      if (latestSub) {
+        await User.findByIdAndUpdate(userId, {
+          subscription: {
+            plan: latestSub.planName,
+            duration: latestSub.duration,
+            expiresAt: latestSub.endDate,
+          },
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error linking guest records:', error.message);
+  }
+};
 
 // Register or resend OTP
 export const register = async (req, res) => {
@@ -369,7 +411,7 @@ export const verifyOTP = async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const isOtpExpired = Date.now() > user.otpExpiresAt;
-
+    
     if (user.otp !== otp || isOtpExpired) {
       return res.status(400).json({ message: 'Invalid or expired OTP' });
     }
@@ -378,6 +420,9 @@ export const verifyOTP = async (req, res) => {
     user.otp = null;
     user.otpExpiresAt = null;
     await user.save();
+
+    // Link any guest purchases made with this email
+    await linkGuestRecords(user);
 
     res.status(200).json({ message: 'Email verified successfully' });
   } catch (err) {
@@ -426,6 +471,10 @@ export const login = async (req, res) => {
         role: user.role,
       },
     });
+
+    // Ensure any guest purchases are linked upon login
+    await linkGuestRecords(user);
+
   } catch (error) {
     console.error('Login error:', error.message);
     res.status(500).json({ message: 'Something went wrong during login' });

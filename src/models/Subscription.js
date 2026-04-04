@@ -5,8 +5,10 @@ const subscriptionSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false // Optional for guest checkout
   },
+  email: { type: String }, // Store for guest linking
+  phone: { type: String }, // Store for guest linking
   planId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Plan',

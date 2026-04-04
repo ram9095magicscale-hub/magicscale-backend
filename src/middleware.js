@@ -7,6 +7,7 @@ export function middleware(request) {
   // Define allowed origins
   const allowedOrigins = [
     "http://localhost:5173",
+    "http://localhost:5174",
     "http://localhost:3000",
     "https://magicscale-frontend.vercel.app",
     "https://www.magicscale-frontend.vercel.app",

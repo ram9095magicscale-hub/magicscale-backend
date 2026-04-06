@@ -12,7 +12,7 @@ export function middleware(request) {
     "https://magicscale-frontend.vercel.app",
     "https://www.magicscale-frontend.vercel.app",
     "https://www.magicscale.in",
-    "https://magicscale.in"
+    "https://magicscal  e.in"
   ];
 
   // Check if the request origin is in the allowed list

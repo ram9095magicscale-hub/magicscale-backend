@@ -84,5 +84,9 @@ export async function POST(req, { params }) {
     });
   }
 
-  return Response.json({ message: "Not Found" }, { status: 404 });
+  return Response.json({ 
+    message: `Cashfree Action '${action}' not found`,
+    slug: slug,
+    status: "error"
+  }, { status: 404 });
 }

@@ -107,7 +107,7 @@ export const getPlan = async (req, res) => {
         "basic-growth": {
           name: "Basic Growth Plan",
           slug: "basic-growth",
-          price: 7999,
+          price: 8499,
           features: [
             "Menu Score Analytics",
             "Review Management",
@@ -118,7 +118,7 @@ export const getPlan = async (req, res) => {
         "premium-growth": {
           name: "Premium Growth Plan",
           slug: "premium-growth",
-          price: 9999,
+          price: 11999,
           features: [
             "Dedicated Account Manager",
             "Ad Campaign Management",

@@ -80,6 +80,61 @@ export async function POST(req, { params }) {
     });
   }
 
+  if (action === "create-link") {
+    return handleRequest(req, { params }, async (req, res) => {
+      const { name, email, phone, amount, purpose } = req.body;
+      const linkId = "LNK_" + Date.now();
+
+      const linkUrl =
+        env === "PROD"
+          ? "https://api.cashfree.com/pg/links"
+          : "https://sandbox.cashfree.com/pg/links";
+
+      try {
+        const linkResponse = await axios.post(
+          linkUrl,
+          {
+            link_id: linkId,
+            link_amount: amount,
+            link_currency: "INR",
+            link_purpose: purpose || "Purchase at MagicScale",
+            customer_details: {
+              customer_phone: phone,
+              customer_email: email,
+              customer_name: name,
+            },
+            link_notify: {
+              send_sms: true,
+              send_email: true,
+            },
+          },
+          {
+            headers: {
+              "x-client-id": appId,
+              "x-client-secret": secretKey,
+              "x-api-version": "2023-08-01",
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        return res.json({
+          success: true,
+          link_id: linkId,
+          link_url: linkResponse.data.link_url,
+          link_status: linkResponse.data.link_status,
+        });
+      } catch (axiosErr) {
+        console.error("Cashfree Link API Error:", axiosErr.response?.data || axiosErr.message);
+        return res.status(axiosErr.response?.status || 400).json({
+          success: false,
+          message: axiosErr.response?.data?.message || axiosErr.message,
+          error: axiosErr.response?.data
+        });
+      }
+    });
+  }
+
   if (action === "confirm-payment") {
     return handleRequest(req, { params }, async (req, res) => {
       const { order_id, userId, plan, duration, amount, email, name, phone } = req.body;
@@ -156,6 +211,67 @@ export async function POST(req, { params }) {
           message: "Error verifying payment", 
           error: err.response?.data || err.message 
         });
+      }
+    });
+  }
+
+  if (action === "webhook") {
+    // Note: In production, verify signatures here
+    return handleRequest(req, { params }, async (req, res) => {
+      const data = req.body;
+      const { order_id, order_amount, payment_status, customer_details } = data.data?.order || {};
+
+      if (payment_status === "PAID") {
+        const existingPayment = await Payment.findOne({ orderId: order_id });
+        if (!existingPayment) {
+          await Payment.create({
+            name: customer_details?.customer_name,
+            email: customer_details?.customer_email,
+            phone: customer_details?.customer_phone,
+            plan: "Payment Link Selection",
+            duration: 1,
+            amount: order_amount,
+            orderId: order_id,
+            status: "paid",
+            timestamp: new Date(),
+          });
+          
+          try {
+            await sendPaymentEmails({ 
+              name: customer_details?.customer_name, 
+              email: customer_details?.customer_email, 
+              plan: "Payment Link", 
+              amount: order_amount, 
+              orderId: order_id 
+            });
+          } catch (e) {}
+        }
+      }
+      return res.json({ status: "received" });
+    });
+  }
+
+  if (action === "user-details") {
+    return handleRequest(req, { params }, async (req, res) => {
+      const { identifier } = req.query; // email or phone
+      if (!identifier) return res.status(400).json({ success: false, message: "Identifier required" });
+
+      try {
+        const user = await User.findOne({
+          $or: [{ email: identifier }, { phone: identifier }]
+        }).select('name email phone');
+
+        const lastPayment = await Payment.findOne({
+          $or: [{ email: identifier }, { phone: identifier }]
+        }).sort({ timestamp: -1 });
+
+        return res.json({
+          success: true,
+          user: user || (lastPayment ? { name: lastPayment.name, email: lastPayment.email, phone: lastPayment.phone } : null),
+          lastPayment
+        });
+      } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
       }
     });
   }

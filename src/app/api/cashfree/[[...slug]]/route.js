@@ -11,6 +11,11 @@ export async function POST(req, { params }) {
   const { slug } = (await params) || { slug: [] };
   const action = slug[0];
 
+  // Automatically trim credentials to prevent 401 errors from accidental whitespace
+  const appId = process.env.CASHFREE_APP_ID?.trim();
+  const secretKey = process.env.CASHFREE_SECRET_KEY?.trim();
+  const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase();
+
   if (action === "initiate-payment") {
     return handleRequest(req, { params }, async (req, res) => {
       let { name, email, phone, amount, return_url } = req.body;
@@ -28,7 +33,7 @@ export async function POST(req, { params }) {
       console.log("Initiating payment for:", { name, email, amount, phone, orderId });
 
       const orderUrl =
-        process.env.CASHFREE_ENV === "PROD"
+        env === "PROD"
           ? "https://api.cashfree.com/pg/orders"
           : "https://sandbox.cashfree.com/pg/orders";
 
@@ -51,8 +56,8 @@ export async function POST(req, { params }) {
           },
           {
             headers: {
-              "x-client-id": process.env.CASHFREE_APP_ID,
-              "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+              "x-client-id": appId,
+              "x-client-secret": secretKey,
               "x-api-version": "2023-08-01",
               "Content-Type": "application/json",
             },
@@ -85,14 +90,14 @@ export async function POST(req, { params }) {
 
       try {
         // 1. Verify payment status with Cashfree
-        const statusUrl = process.env.CASHFREE_ENV === "PROD"
+        const statusUrl = env === "PROD"
           ? `https://api.cashfree.com/pg/orders/${order_id}`
           : `https://sandbox.cashfree.com/pg/orders/${order_id}`;
 
         const statusResponse = await axios.get(statusUrl, {
           headers: {
-            "x-client-id": process.env.CASHFREE_APP_ID,
-            "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+            "x-client-id": appId,
+            "x-client-secret": secretKey,
             "x-api-version": "2022-09-01",
           },
         });

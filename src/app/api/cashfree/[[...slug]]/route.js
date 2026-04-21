@@ -13,45 +13,65 @@ export async function POST(req, { params }) {
 
   if (action === "initiate-payment") {
     return handleRequest(req, { params }, async (req, res) => {
-      const { name, email, phone, amount, return_url } = req.body;
+      let { name, email, phone, amount, return_url } = req.body;
       const orderId = "ORD_" + Date.now();
+
+      // Sanitize phone: Cashfree expects a valid 10-digit number or prefixed with country code
+      // Removing any spaces or special characters
+      if (phone) {
+        phone = phone.replace(/[^\d+]/g, ''); 
+        if (phone.length > 10 && phone.startsWith('0')) {
+          phone = phone.substring(1); // Remove leading 0 if present in international format
+        }
+      }
+
+      console.log("Initiating payment for:", { name, email, amount, phone, orderId });
 
       const orderUrl =
         process.env.CASHFREE_ENV === "PROD"
           ? "https://api.cashfree.com/pg/orders"
           : "https://sandbox.cashfree.com/pg/orders";
 
-      const orderResponse = await axios.post(
-        orderUrl,
-        {
-          order_id: orderId,
-          order_amount: amount,
-          order_currency: "INR",
-          customer_details: {
-            customer_id: email.replace(/[^a-zA-Z0-9_-]/g, "_"),
-            customer_name: name,
-            customer_email: email,
-            customer_phone: phone,
+      try {
+        const orderResponse = await axios.post(
+          orderUrl,
+          {
+            order_id: orderId,
+            order_amount: amount,
+            order_currency: "INR",
+            customer_details: {
+              customer_id: email.replace(/[^a-zA-Z0-9_-]/g, "_"),
+              customer_name: name,
+              customer_email: email,
+              customer_phone: phone,
+            },
+            order_meta: {
+              return_url: return_url || `https://magicscale.in/payment-success?order_id=${orderId}`,
+            },
           },
-          order_meta: {
-            return_url: return_url || `https://magicscale.in/payment-success?order_id=${orderId}`,
-          },
-        },
-        {
-          headers: {
-            "x-client-id": process.env.CASHFREE_APP_ID,
-            "x-client-secret": process.env.CASHFREE_SECRET_KEY,
-            "x-api-version": "2022-09-01",
-            "Content-Type": "application/json",
-          },
-        }
-      );
+          {
+            headers: {
+              "x-client-id": process.env.CASHFREE_APP_ID,
+              "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+              "x-api-version": "2023-08-01",
+              "Content-Type": "application/json",
+            },
+          }
+        );
 
-      res.json({
-        success: true,
-        order_id: orderId,
-        payment_session_id: orderResponse.data.payment_session_id,
-      });
+        return res.json({
+          success: true,
+          order_id: orderId,
+          payment_session_id: orderResponse.data.payment_session_id,
+        });
+      } catch (axiosErr) {
+        console.error("Cashfree API Error:", axiosErr.response?.data || axiosErr.message);
+        return res.status(axiosErr.response?.status || 400).json({
+          success: false,
+          message: axiosErr.response?.data?.message || axiosErr.message,
+          error: axiosErr.response?.data
+        });
+      }
     });
   }
 

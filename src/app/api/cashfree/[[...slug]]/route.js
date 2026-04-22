@@ -82,30 +82,36 @@ export async function POST(req, { params }) {
 
   if (action === "create-link") {
     return handleRequest(req, { params }, async (req, res) => {
-      const { name, email, phone, amount, purpose } = req.body;
-      const linkId = "LNK_" + Date.now();
+      const { name, email, phone, amount, totalServicePrice, purpose, return_url } = req.body;
+      const finalAmount = amount || totalServicePrice;
+      
+      if (!finalAmount) {
+        return res.status(400).json({ success: false, message: "Amount is required" });
+      }
 
-      const linkUrl =
+      const orderId = "LNK_" + Date.now();
+
+      const orderUrl =
         env === "PROD"
-          ? "https://api.cashfree.com/pg/links"
-          : "https://sandbox.cashfree.com/pg/links";
+          ? "https://api.cashfree.com/pg/orders"
+          : "https://sandbox.cashfree.com/pg/orders";
 
       try {
-        const linkResponse = await axios.post(
-          linkUrl,
+        // We use pg/orders as a fallback because pg/links is often not enabled by default
+        const orderResponse = await axios.post(
+          orderUrl,
           {
-            link_id: linkId,
-            link_amount: amount,
-            link_currency: "INR",
-            link_purpose: purpose || "Purchase at MagicScale",
+            order_id: orderId,
+            order_amount: finalAmount,
+            order_currency: "INR",
             customer_details: {
-              customer_phone: phone,
-              customer_email: email,
-              customer_name: name,
+              customer_id: email ? email.replace(/[^a-zA-Z0-9_-]/g, "_") : "guest_" + Date.now(),
+              customer_name: name || "Customer",
+              customer_email: email || "customer@example.com",
+              customer_phone: phone || "9999999999",
             },
-            link_notify: {
-              send_sms: true,
-              send_email: true,
+            order_meta: {
+              return_url: return_url || `https://magicscale.in/payment-success?order_id=${orderId}`,
             },
           },
           {
@@ -118,14 +124,25 @@ export async function POST(req, { params }) {
           }
         );
 
+        const sessionId = orderResponse.data.payment_session_id;
+        // This is the hosted checkout URL for Cashfree
+        const checkoutUrl = env === "PROD" 
+          ? `https://payments.cashfree.com/order/#${sessionId}`
+          : `https://sandbox.cashfree.com/pg/view/checkout/${sessionId}`; 
+        
+        // Note: For sandbox, the URL structure might be different or requires the SDK.
+        // However, https://sandbox.cashfree.com/pg/view/checkout/${sessionId} is the standard sandbox hosted page.
+
         return res.json({
           success: true,
-          link_id: linkId,
-          link_url: linkResponse.data.link_url,
-          link_status: linkResponse.data.link_status,
+          link_id: orderId,
+          link_url: checkoutUrl,
+          payment_session_id: sessionId,
+          order_id: orderId,
+          message: "Payment link generated successfully via Orders API"
         });
       } catch (axiosErr) {
-        console.error("Cashfree Link API Error:", axiosErr.response?.data || axiosErr.message);
+        console.error("Cashfree Order-as-Link API Error:", axiosErr.response?.data || axiosErr.message);
         return res.status(axiosErr.response?.status || 400).json({
           success: false,
           message: axiosErr.response?.data?.message || axiosErr.message,

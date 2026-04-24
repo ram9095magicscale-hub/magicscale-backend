@@ -394,15 +394,31 @@ export async function POST(req, { params }) {
     });
   }
 
+    });
+  }
+}
+
+export async function GET(req, { params }) {
+  const { slug } = (await params) || { slug: [] };
+  const action = slug[0];
+
+  if (action === "webhook") {
+    return Response.json({
+      status: "active",
+      message: "Webhook endpoint is live. Use POST for actual notifications.",
+      url: req.url
+    });
+  }
+
+  // Handle user-details and get-all-links
   if (action === "user-details") {
     return handleRequest(req, { params }, async (req, res) => {
-      const { identifier } = req.query; // email or phone
+      const { identifier } = req.query;
       if (!identifier) return res.status(400).json({ success: false, message: "Identifier required" });
 
       try {
         const normalizedIdentifier = identifier?.toLowerCase()?.trim();
         const sanitizedPhone = identifier?.replace(/\D/g, "")?.slice(-10);
-        console.log(`Lookup search for: ${normalizedIdentifier} / ${sanitizedPhone}`);
         
         const user = await User.findOne({
           $or: [
@@ -412,7 +428,6 @@ export async function POST(req, { params }) {
           ]
         }).select('name email phone');
 
-        // Fetch all payments for this user to calculate balance
         const payments = await Payment.find({
           $or: [
             { email: normalizedIdentifier }, 
@@ -421,18 +436,13 @@ export async function POST(req, { params }) {
           ]
         }).sort({ timestamp: -1 });
 
-        console.log(`Found ${payments.length} payments for lookup`);
-
         const lastPayment = payments[0] || null;
-        
-        // Calculate pending balance if last payment was partial
         let pendingBalance = 0;
         if (lastPayment && lastPayment.totalAmount) {
             const totalPaid = payments
                 .filter(p => p.plan === lastPayment.plan)
                 .reduce((sum, p) => sum + p.amount, 0);
             pendingBalance = Math.max(0, lastPayment.totalAmount - totalPaid);
-            console.log(`Calculated balance: ₹${pendingBalance}`);
         }
 
         return res.json({
@@ -442,7 +452,6 @@ export async function POST(req, { params }) {
           pendingBalance
         });
       } catch (err) {
-        console.error("Lookup error:", err.message);
         return res.status(500).json({ success: false, message: err.message });
       }
     });
@@ -464,24 +473,6 @@ export async function POST(req, { params }) {
       }
     });
   }
-
-}
-
-export async function GET(req, { params }) {
-  const { slug } = (await params) || { slug: [] };
-  const action = slug[0];
-
-  if (action === "webhook") {
-    return Response.json({
-      status: "active",
-      message: "Webhook endpoint is live. Use POST for actual notifications.",
-      url: req.url
-    });
-  }
-
-  // Handle user-details (already logic exists but let's wrap it if needed, 
-  // currently it's handled in POST block which is weird for a search, but keeping it for compatibility)
-  
   if (action === "checkout") {
     const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase() || "PROD";
     const url = new URL(req.url, `https://${req.headers["host"] || "magicscale.in"}`);

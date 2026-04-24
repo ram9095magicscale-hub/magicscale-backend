@@ -247,3 +247,46 @@ export const sendNewsletterEmail = async (subscribers, blog) => {
   console.log(`✅ Newsletter sent to ${sentCount}/${subscribers.length} subscribers`);
   return results;
 };
+
+// ✅ New: Send Payment Link Email
+export const sendPaymentLinkEmail = async ({ name, email, plan, amount, link }) => {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: `🔗 Your Payment Link for ${plan} - MagicScale`,
+    html: `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eef2f6; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
+        <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 30px; text-align: center; color: white;">
+          <h1 style="margin: 0; font-size: 24px;">MagicScale</h1>
+        </div>
+        <div style="padding: 40px; background: white;">
+          <h2 style="color: #1e293b; font-size: 20px; margin-bottom: 20px;">Hi ${name},</h2>
+          <p style="color: #475569; line-height: 1.7; font-size: 16px;">
+            Please find the payment link for <strong>${plan}</strong> below:
+          </p>
+          <div style="background: #f8fafc; border-radius: 12px; padding: 25px; margin: 30px 0; border-left: 4px solid #4f46e5;">
+            <p style="margin: 0 0 10px 0; color: #64748b; font-[12px] uppercase font-bold tracking-wider">Plan Details</p>
+            <p style="margin: 0; color: #1e293b; font-size: 18px; font-weight: 800;">₹${amount}</p>
+          </div>
+          <div style="text-align: center; margin-top: 35px;">
+            <a href="${link}" style="display: inline-block; background: #4f46e5; color: white; padding: 14px 35px; text-decoration: none; border-radius: 10px; font-weight: bold; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">Complete Payment</a>
+          </div>
+          <p style="color: #475569; font-size: 14px; margin-top: 30px;">
+            If the button doesn't work, copy this link: <br/>
+            <span style="color: #4f46e5; word-break: break-all;">${link}</span>
+          </p>
+          <p style="color: #475569; font-size: 16px; margin-top: 40px; font-weight: 500;">
+            Thank you for choosing MagicScale!<br/><br/>
+            Best Regards,<br/>
+            <strong>Vikas</strong><br/>
+            MagicScale Team<br/>
+            <a href="https://magicscale.in" style="color: #4f46e5; text-decoration: none;">www.magicscale.in</a>
+          </p>
+        </div>
+      </div>
+    `,
+  };
+  const info = await transporter.sendMail(mailOptions);
+  console.log('✅ Payment link email sent:', info.response);
+  return info;
+};

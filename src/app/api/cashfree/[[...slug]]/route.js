@@ -1,7 +1,7 @@
 import axios from "axios";
 import User from "@/models/User";
 import Payment from "@/models/Payment";
-import { sendPaymentEmails } from "@/utils/email";
+import { sendPaymentEmails, sendPaymentLinkEmail } from "@/utils/email";
 import { handleRequest } from "@/lib/route-adapter";
 
 /**
@@ -209,6 +209,21 @@ export async function POST(req, { params }) {
           timestamp: new Date(),
         });
         console.log(`✅ Pending payment record created with Link: ${orderId}`);
+        
+        // AUTO-SEND EMAIL
+        try {
+          await sendPaymentLinkEmail({
+            name: name || user?.name || "Customer",
+            email: normalizedEmail,
+            plan: purpose || "Service Payment",
+            amount: finalAmount,
+            link: checkoutUrl
+          });
+          console.log(`📧 Auto-email sent to ${normalizedEmail}`);
+        } catch (mailErr) {
+          console.error("❌ Auto-email failed:", mailErr.message);
+        }
+
       } catch (payErr) {
         console.error("❌ Failed to create pending payment record:", payErr.message);
       }

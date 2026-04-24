@@ -1,5 +1,6 @@
 import Payment from "@/models/Payment";
 import User from "@/models/User";
+import JobApplication from "@/models/JobApplication";
 
 /**
  * Fetch all transactions (payments) for the admin dashboard
@@ -36,5 +37,18 @@ export const getAdminStats = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch stats" });
+  }
+};
+
+/**
+ * Fetch all job applications for the admin dashboard
+ */
+export const getAllJobApplications = async (req, res) => {
+  try {
+    const applications = await JobApplication.find().sort({ appliedAt: -1 });
+    res.status(200).json(applications);
+  } catch (error) {
+    console.error("Error fetching job applications:", error);
+    res.status(500).json({ message: "Failed to fetch applications" });
   }
 };

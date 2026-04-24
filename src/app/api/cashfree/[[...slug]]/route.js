@@ -24,13 +24,20 @@ export async function POST(req, { params }) {
       // Sanitize phone: Cashfree expects a valid 10-digit number or prefixed with country code
       // Removing any spaces or special characters
       if (phone) {
-        phone = phone.replace(/[^\d+]/g, ''); 
+        phone = phone.replace(/[^\d+]/g, '');
         if (phone.length > 10 && phone.startsWith('0')) {
           phone = phone.substring(1); // Remove leading 0 if present in international format
         }
       }
 
       console.log("Initiating payment for:", { name, email, amount, phone, orderId });
+
+      // Cashfree Production requires an HTTPS return URL.
+      // We automatically convert http:// to https:// to prevent the API from rejecting the request.
+      let safeReturnUrl = return_url || `https://magicscale.in/payment-success?order_id=${orderId}`;
+      if (env === "PROD" && safeReturnUrl.startsWith("http://")) {
+        safeReturnUrl = safeReturnUrl.replace("http://", "https://");
+      }
 
       const orderUrl =
         env === "PROD"
@@ -51,7 +58,7 @@ export async function POST(req, { params }) {
               customer_phone: phone,
             },
             order_meta: {
-              return_url: return_url || `https://magicscale.in/payment-success?order_id=${orderId}`,
+              return_url: safeReturnUrl,
             },
           },
           {
@@ -84,12 +91,18 @@ export async function POST(req, { params }) {
     return handleRequest(req, { params }, async (req, res) => {
       const { name, email, phone, amount, totalServicePrice, purpose, return_url } = req.body;
       const finalAmount = amount || totalServicePrice;
-      
+
       if (!finalAmount) {
         return res.status(400).json({ success: false, message: "Amount is required" });
       }
 
       const orderId = "LNK_" + Date.now();
+
+      // Cashfree Production requires an HTTPS return URL.
+      let safeReturnUrl = return_url || `https://magicscale.in/payment-success?order_id=${orderId}`;
+      if (env === "PROD" && safeReturnUrl.startsWith("http://")) {
+        safeReturnUrl = safeReturnUrl.replace("http://", "https://");
+      }
 
       const orderUrl =
         env === "PROD"
@@ -111,7 +124,7 @@ export async function POST(req, { params }) {
               customer_phone: phone || "9999999999",
             },
             order_meta: {
-              return_url: return_url || `https://magicscale.in/payment-success?order_id=${orderId}`,
+              return_url: safeReturnUrl,
             },
           },
           {
@@ -125,11 +138,14 @@ export async function POST(req, { params }) {
         );
 
         const sessionId = orderResponse.data.payment_session_id;
-        // This is the hosted checkout URL for Cashfree
-        const checkoutUrl = env === "PROD" 
-          ? `https://payments.cashfree.com/order/#${sessionId}`
-          : `https://sandbox.cashfree.com/pg/view/checkout/${sessionId}`; 
         
+        // Fix for "client session is invalid" error: Use the official NextGen hosted checkout format.
+        const checkoutUrl = env === "PROD"
+          ? `https://payments.cashfree.com/order/checkout?session_id=${sessionId}`
+          : `https://sandbox.cashfree.com/pg/view/checkout/${sessionId}`;
+
+        console.log(`Generated Link for ${env}: ${checkoutUrl}`);
+
         // Note: For sandbox, the URL structure might be different or requires the SDK.
         // However, https://sandbox.cashfree.com/pg/view/checkout/${sessionId} is the standard sandbox hosted page.
 
@@ -175,9 +191,9 @@ export async function POST(req, { params }) {
         });
 
         if (statusResponse.data.order_status !== "PAID") {
-          return res.status(400).json({ 
-            success: false, 
-            message: `Payment not verified (Status: ${statusResponse.data.order_status})` 
+          return res.status(400).json({
+            success: false,
+            message: `Payment not verified (Status: ${statusResponse.data.order_status})`
           });
         }
 
@@ -223,28 +239,41 @@ export async function POST(req, { params }) {
         res.json({ success: true, message: "Payment confirmed successfully" });
       } catch (err) {
         console.error("Cashfree Verification Error:", err.response?.data || err.message);
-        res.status(500).json({ 
-          success: false, 
-          message: "Error verifying payment", 
-          error: err.response?.data || err.message 
+        res.status(500).json({
+          success: false,
+          message: "Error verifying payment",
+          error: err.response?.data || err.message
         });
       }
     });
   }
 
   if (action === "webhook") {
-    // Note: In production, verify signatures here
+    // Note: In production, you should verify signatures using x-cf-signature header
     return handleRequest(req, { params }, async (req, res) => {
-      const data = req.body;
-      const { order_id, order_amount, payment_status, customer_details } = data.data?.order || {};
+      const payload = req.body;
+      console.log("🔔 CASHFREE WEBHOOK RECEIVED:", JSON.stringify(payload, null, 2));
 
-      if (payment_status === "PAID") {
+      // Standard NextGen Webhook Structure (2022-09-01 onwards)
+      // data.order.order_id, data.payment.payment_status, etc.
+      const orderData = payload.data?.order;
+      const paymentData = payload.data?.payment;
+      const customerData = payload.data?.customer_details;
+
+      const order_id = orderData?.order_id;
+      const order_amount = orderData?.order_amount;
+      const payment_status = paymentData?.payment_status || orderData?.order_status; // Handle variations
+
+      if (payment_status === "SUCCESS" || payment_status === "PAID") {
+        console.log(`✅ Webhook: Payment Success for Order ${order_id}`);
+        
         const existingPayment = await Payment.findOne({ orderId: order_id });
         if (!existingPayment) {
+          console.log(`📝 Recording new payment for Order ${order_id}`);
           await Payment.create({
-            name: customer_details?.customer_name,
-            email: customer_details?.customer_email,
-            phone: customer_details?.customer_phone,
+            name: customerData?.customer_name || "Customer",
+            email: customerData?.customer_email || "customer@example.com",
+            phone: customerData?.customer_phone || "0000000000",
             plan: "Payment Link Selection",
             duration: 1,
             amount: order_amount,
@@ -252,19 +281,27 @@ export async function POST(req, { params }) {
             status: "paid",
             timestamp: new Date(),
           });
-          
+
           try {
-            await sendPaymentEmails({ 
-              name: customer_details?.customer_name, 
-              email: customer_details?.customer_email, 
-              plan: "Payment Link", 
-              amount: order_amount, 
-              orderId: order_id 
+            await sendPaymentEmails({
+              name: customerData?.customer_name,
+              email: customerData?.customer_email,
+              plan: "Payment Link",
+              amount: order_amount,
+              orderId: order_id
             });
-          } catch (e) {}
+            console.log(`📧 Confirmation email sent for Order ${order_id}`);
+          } catch (e) {
+            console.error("📧 Email sending failed in webhook:", e.message);
+          }
+        } else {
+          console.log(`ℹ️ Payment for Order ${order_id} already exists, skipping.`);
         }
+      } else {
+        console.log(`⚠️ Webhook: Payment status is ${payment_status} for Order ${order_id}`);
       }
-      return res.json({ status: "received" });
+
+      return res.json({ status: "OK", message: "Webhook processed" });
     });
   }
 
@@ -293,9 +330,26 @@ export async function POST(req, { params }) {
     });
   }
 
-  return Response.json({ 
-    message: `Cashfree Action '${action}' not found`,
-    slug: slug,
-    status: "error"
-  }, { status: 404 });
+}
+
+export async function GET(req, { params }) {
+  const { slug } = (await params) || { slug: [] };
+  const action = slug[0];
+
+  if (action === "webhook") {
+    return Response.json({
+      status: "active",
+      message: "Webhook endpoint is live. Use POST for actual notifications.",
+      url: req.url
+    });
+  }
+
+  // Handle user-details (already logic exists but let's wrap it if needed, 
+  // currently it's handled in POST block which is weird for a search, but keeping it for compatibility)
+  
+  return Response.json({
+    message: "Cashfree API GET endpoint",
+    slug,
+    status: "ok"
+  });
 }

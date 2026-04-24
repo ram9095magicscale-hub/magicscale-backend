@@ -142,7 +142,7 @@ export async function POST(req, { params }) {
         // Fix: Redirect to our own checkout page that uses the SDK
         // This avoids 404 and "session invalid" errors from linking directly to Cashfree.
         const baseUrl = env === "PROD" ? "https://magicscale.in" : "http://localhost:3000";
-        const checkoutUrl = `${baseUrl}/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
+        const checkoutUrl = `${baseUrl}/checkout-link?session_id=${sessionId}&env=${env.toLowerCase()}`;
 
         console.log(`Generated Link for ${env}: ${checkoutUrl}`);
 

@@ -65,7 +65,7 @@ export async function POST(req, { params }) {
             headers: {
               "x-client-id": appId,
               "x-client-secret": secretKey,
-              "x-api-version": "2023-08-01",
+              "x-api-version": "2022-09-01",
               "Content-Type": "application/json",
             },
           }
@@ -131,7 +131,7 @@ export async function POST(req, { params }) {
             headers: {
               "x-client-id": appId,
               "x-client-secret": secretKey,
-              "x-api-version": "2023-08-01",
+              "x-api-version": "2022-09-01",
               "Content-Type": "application/json",
             },
           }
@@ -139,10 +139,10 @@ export async function POST(req, { params }) {
 
         const sessionId = orderResponse.data.payment_session_id;
         
-        // Fix for "client session is invalid" error: Use the official NextGen hosted checkout format.
+        // Updated Checkout URL for better compatibility with Production sessions
         const checkoutUrl = env === "PROD"
-          ? `https://payments.cashfree.com/order/checkout?session_id=${sessionId}`
-          : `https://sandbox.cashfree.com/pg/view/checkout/${sessionId}`;
+          ? `https://payments.cashfree.com/pg/view/checkout?session_id=${sessionId}`
+          : `https://sandbox.cashfree.com/pg/view/checkout?session_id=${sessionId}`;
 
         console.log(`Generated Link for ${env}: ${checkoutUrl}`);
 

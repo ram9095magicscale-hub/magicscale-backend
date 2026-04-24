@@ -482,7 +482,7 @@ export async function GET(req, { params }) {
   
   if (action === "checkout") {
     const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase() || "PROD";
-    const url = new URL(req.url, `https://${req.headers.get("host") || "magicscale.in"}`);
+    const url = new URL(req.url, `https://${req.headers["host"] || "magicscale.in"}`);
     const searchParams = url.searchParams;
     const sessionId = searchParams.get("session_id");
     const envParam = searchParams.get("env") || "prod";

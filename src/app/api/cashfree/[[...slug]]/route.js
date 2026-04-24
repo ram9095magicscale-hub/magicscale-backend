@@ -103,16 +103,17 @@ export async function POST(req, { params }) {
       }
 
       const orderId = "LNK_" + Date.now();
+      const normalizedEmail = email?.toLowerCase()?.trim();
 
       // 1. Find or Create User so they show up in Customers list
-      console.log(`Checking for user: ${email}`);
-      let user = await User.findOne({ email });
+      console.log(`Checking for user: ${normalizedEmail}`);
+      let user = await User.findOne({ email: normalizedEmail });
       if (!user) {
-        console.log(`Creating new user for: ${email}`);
+        console.log(`Creating new user for: ${normalizedEmail}`);
         try {
           user = await User.create({
             name: name || "Customer",
-            email,
+            email: normalizedEmail,
             phone,
             password: Math.random().toString(36).slice(-8), // Placeholder password
             role: "user",
@@ -121,7 +122,6 @@ export async function POST(req, { params }) {
           console.log(`✅ New user created: ${user._id}`);
         } catch (createErr) {
           console.error("❌ User creation failed:", createErr.message);
-          // Don't fail the link generation if user creation fails, but log it
         }
       } else {
         console.log(`Found existing user: ${user._id}`);
@@ -238,6 +238,10 @@ export async function POST(req, { params }) {
           return res.json({ success: true, message: "Payment already processed" });
         }
 
+        // Fetch user if not provided (for link-based payments)
+        const customerEmail = statusResponse.data.customer_details?.customer_email;
+        const user = await User.findOne({ email: customerEmail?.toLowerCase() });
+
         // 3. Create Payment record
         const totalAmount = statusResponse.data.order_meta?.total_amount 
            ? parseFloat(statusResponse.data.order_meta.total_amount) 
@@ -352,14 +356,16 @@ export async function POST(req, { params }) {
       if (!identifier) return res.status(400).json({ success: false, message: "Identifier required" });
 
       try {
-        console.log(`Lookup search for: ${identifier}`);
+        const normalizedIdentifier = identifier?.toLowerCase()?.trim();
+        console.log(`Lookup search for: ${normalizedIdentifier}`);
+        
         const user = await User.findOne({
-          $or: [{ email: identifier }, { phone: identifier }]
+          $or: [{ email: normalizedIdentifier }, { phone: normalizedIdentifier }]
         }).select('name email phone');
 
         // Fetch all payments for this user to calculate balance
         const payments = await Payment.find({
-          $or: [{ email: identifier }, { phone: identifier }]
+          $or: [{ email: normalizedIdentifier }, { phone: normalizedIdentifier }]
         }).sort({ timestamp: -1 });
 
         console.log(`Found ${payments.length} payments for lookup`);

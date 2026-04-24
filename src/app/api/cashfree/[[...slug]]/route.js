@@ -105,20 +105,30 @@ export async function POST(req, { params }) {
       const orderId = "LNK_" + Date.now();
 
       // 1. Find or Create User so they show up in Customers list
+      console.log(`Checking for user: ${email}`);
       let user = await User.findOne({ email });
       if (!user) {
-        user = await User.create({
-          name: name || "Customer",
-          email,
-          phone,
-          password: Math.random().toString(36).slice(-8), // Placeholder password
-          role: "user",
-          isVerified: true
-        });
-        console.log(`New user created during link generation: ${email}`);
-      } else if (!user.phone && phone) {
-        user.phone = phone;
-        await user.save();
+        console.log(`Creating new user for: ${email}`);
+        try {
+          user = await User.create({
+            name: name || "Customer",
+            email,
+            phone,
+            password: Math.random().toString(36).slice(-8), // Placeholder password
+            role: "user",
+            isVerified: true
+          });
+          console.log(`✅ New user created: ${user._id}`);
+        } catch (createErr) {
+          console.error("❌ User creation failed:", createErr.message);
+          // Don't fail the link generation if user creation fails, but log it
+        }
+      } else {
+        console.log(`Found existing user: ${user._id}`);
+        if (!user.phone && phone) {
+          user.phone = phone;
+          await user.save();
+        }
       }
 
       // Cashfree Production requires an HTTPS return URL.
@@ -342,6 +352,7 @@ export async function POST(req, { params }) {
       if (!identifier) return res.status(400).json({ success: false, message: "Identifier required" });
 
       try {
+        console.log(`Lookup search for: ${identifier}`);
         const user = await User.findOne({
           $or: [{ email: identifier }, { phone: identifier }]
         }).select('name email phone');
@@ -351,16 +362,18 @@ export async function POST(req, { params }) {
           $or: [{ email: identifier }, { phone: identifier }]
         }).sort({ timestamp: -1 });
 
+        console.log(`Found ${payments.length} payments for lookup`);
+
         const lastPayment = payments[0] || null;
         
         // Calculate pending balance if last payment was partial
-        // Logic: totalServicePrice - sum of all amounts paid for this purpose
         let pendingBalance = 0;
         if (lastPayment && lastPayment.totalAmount) {
             const totalPaid = payments
                 .filter(p => p.plan === lastPayment.plan)
                 .reduce((sum, p) => sum + p.amount, 0);
             pendingBalance = Math.max(0, lastPayment.totalAmount - totalPaid);
+            console.log(`Calculated balance: ₹${pendingBalance}`);
         }
 
         return res.json({
@@ -370,6 +383,7 @@ export async function POST(req, { params }) {
           pendingBalance
         });
       } catch (err) {
+        console.error("Lookup error:", err.message);
         return res.status(500).json({ success: false, message: err.message });
       }
     });

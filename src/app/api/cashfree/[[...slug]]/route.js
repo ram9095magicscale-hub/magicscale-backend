@@ -204,6 +204,7 @@ export async function POST(req, { params }) {
         
         // Final Fix: Use the main domain that is whitelisted in Cashfree.
         // We proxy /api requests through the frontend to make this work.
+        const host = req.headers["host"] || "magicscale.in";
         const origin = env === "PROD" ? "https://magicscale.in" : `http://${host}`;
         const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
 
@@ -480,7 +481,8 @@ export async function GET(req, { params }) {
   // currently it's handled in POST block which is weird for a search, but keeping it for compatibility)
   
   if (action === "checkout") {
-    const url = new URL(req.url, `https://${req.headers.get("host") || "magicscale.in"}`);
+    const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase() || "PROD";
+    const url = new URL(req.url, `https://${req.headers["host"] || "magicscale.in"}`);
     const searchParams = url.searchParams;
     const sessionId = searchParams.get("session_id");
     const envParam = searchParams.get("env") || "prod";

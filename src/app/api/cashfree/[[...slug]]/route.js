@@ -104,17 +104,24 @@ export async function POST(req, { params }) {
 
       const orderId = "LNK_" + Date.now();
       const normalizedEmail = email?.toLowerCase()?.trim();
+      const sanitizedPhone = phone?.replace(/\D/g, "")?.slice(-10);
 
       // 1. Find or Create User so they show up in Customers list
-      console.log(`Checking for user: ${normalizedEmail}`);
-      let user = await User.findOne({ email: normalizedEmail });
+      console.log(`Checking for user: ${normalizedEmail} / ${sanitizedPhone}`);
+      let user = await User.findOne({ 
+        $or: [
+          { email: normalizedEmail },
+          { phone: sanitizedPhone }
+        ]
+      });
+
       if (!user) {
         console.log(`Creating new user for: ${normalizedEmail}`);
         try {
           user = await User.create({
             name: name || "Customer",
             email: normalizedEmail,
-            phone,
+            phone: sanitizedPhone,
             password: Math.random().toString(36).slice(-8), // Placeholder password
             role: "user",
             isVerified: true
@@ -125,10 +132,10 @@ export async function POST(req, { params }) {
         }
       } else {
         console.log(`Found existing user: ${user._id}`);
-        if (user.phone !== phone && phone) {
-          user.phone = phone;
-          await user.save();
-        }
+        let updated = false;
+        if (!user.phone && sanitizedPhone) { user.phone = sanitizedPhone; updated = true; }
+        if (!user.name && name) { user.name = name; updated = true; }
+        if (updated) await user.save();
       }
 
       // 2. Store a PENDING payment record so it shows up in lookup
@@ -138,7 +145,7 @@ export async function POST(req, { params }) {
           user: user?._id || null,
           name: name || user?.name || "Customer",
           email: normalizedEmail,
-          phone,
+          phone: sanitizedPhone,
           plan: purpose || "Service Payment",
           duration: 1,
           amount: finalAmount,
@@ -391,15 +398,24 @@ export async function POST(req, { params }) {
 
       try {
         const normalizedIdentifier = identifier?.toLowerCase()?.trim();
-        console.log(`Lookup search for: ${normalizedIdentifier}`);
+        const sanitizedPhone = identifier?.replace(/\D/g, "")?.slice(-10);
+        console.log(`Lookup search for: ${normalizedIdentifier} / ${sanitizedPhone}`);
         
         const user = await User.findOne({
-          $or: [{ email: normalizedIdentifier }, { phone: normalizedIdentifier }]
+          $or: [
+            { email: normalizedIdentifier }, 
+            { phone: normalizedIdentifier },
+            { phone: sanitizedPhone }
+          ]
         }).select('name email phone');
 
         // Fetch all payments for this user to calculate balance
         const payments = await Payment.find({
-          $or: [{ email: normalizedIdentifier }, { phone: normalizedIdentifier }]
+          $or: [
+            { email: normalizedIdentifier }, 
+            { phone: normalizedIdentifier },
+            { phone: sanitizedPhone }
+          ]
         }).sort({ timestamp: -1 });
 
         console.log(`Found ${payments.length} payments for lookup`);
@@ -424,6 +440,23 @@ export async function POST(req, { params }) {
         });
       } catch (err) {
         console.error("Lookup error:", err.message);
+        return res.status(500).json({ success: false, message: err.message });
+      }
+    });
+  }
+
+  if (action === "get-all-links") {
+    return handleRequest(req, { params }, async (req, res) => {
+      try {
+        const links = await Payment.find({ orderId: { $regex: /^LNK_/ } })
+          .sort({ timestamp: -1 })
+          .limit(50);
+        
+        return res.json({
+          success: true,
+          links
+        });
+      } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
       }
     });

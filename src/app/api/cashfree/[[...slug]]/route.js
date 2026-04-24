@@ -147,8 +147,8 @@ export async function POST(req, { params }) {
         
         // Simple Setup: Point to our own backend-hosted checkout page
         // This avoids 404, session invalid, and blank screen errors.
-        const host = req.headers.get("host") || "magicscale.in";
-        const protocol = req.headers.get("x-forwarded-proto") || "https";
+        const host = req.headers["host"] || "magicscale.in";
+        const protocol = req.headers["x-forwarded-proto"] || "https";
         const origin = `${protocol}://${host}`;
         const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
 

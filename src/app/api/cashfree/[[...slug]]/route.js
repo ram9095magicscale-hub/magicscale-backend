@@ -90,10 +90,16 @@ export async function POST(req, { params }) {
   if (action === "create-link") {
     return handleRequest(req, { params }, async (req, res) => {
       const { name, email, phone, amount, totalServicePrice, purpose, return_url } = req.body;
-      const finalAmount = amount || totalServicePrice;
+      const finalAmount = parseFloat(amount || totalServicePrice || "0");
+      
+      console.log(`Creating order for ${email}: ₹${finalAmount} (Env: ${env})`);
+      if (!appId || !secretKey) {
+        console.error("Cashfree credentials missing!");
+        return res.status(500).json({ success: false, message: "Server configuration error (missing API keys)" });
+      }
 
-      if (!finalAmount) {
-        return res.status(400).json({ success: false, message: "Amount is required" });
+      if (!finalAmount || finalAmount <= 0) {
+        return res.status(400).json({ success: false, message: "Valid amount is required" });
       }
 
       const orderId = "LNK_" + Date.now();
@@ -158,11 +164,12 @@ export async function POST(req, { params }) {
           message: "Payment link generated successfully via Orders API"
         });
       } catch (axiosErr) {
-        console.error("Cashfree Order-as-Link API Error:", axiosErr.response?.data || axiosErr.message);
-        return res.status(axiosErr.response?.status || 400).json({
+        const errorData = axiosErr.response?.data;
+        console.error("Cashfree Order API Error:", JSON.stringify(errorData || axiosErr.message));
+        return res.status(axiosErr.response?.status || 500).json({
           success: false,
-          message: axiosErr.response?.data?.message || axiosErr.message,
-          error: axiosErr.response?.data
+          message: errorData?.message || axiosErr.message,
+          error: errorData
         });
       }
     });

@@ -145,12 +145,9 @@ export async function POST(req, { params }) {
 
         const sessionId = orderResponse.data.payment_session_id;
         
-        // Simple Setup: Point to our own backend-hosted checkout page
-        // This avoids 404, session invalid, and blank screen errors.
-        const host = req.headers["host"] || "magicscale.in";
-        let protocol = req.headers["x-forwarded-proto"] || "https";
-        if (protocol.includes(",")) protocol = protocol.split(",")[0];
-        const origin = `${protocol}://${host}`;
+        // Final Fix: Use the main domain that is whitelisted in Cashfree.
+        // We proxy /api requests through the frontend to make this work.
+        const origin = env === "PROD" ? "https://magicscale.in" : `http://${host}`;
         const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
 
         console.log(`Generated Link for ${env}: ${checkoutUrl}`);

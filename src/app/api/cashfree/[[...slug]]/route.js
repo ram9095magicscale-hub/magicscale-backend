@@ -393,9 +393,6 @@ export async function POST(req, { params }) {
       return res.json({ status: "OK", message: "Webhook processed" });
     });
   }
-
-    });
-  }
 }
 
 export async function GET(req, { params }) {

@@ -139,10 +139,10 @@ export async function POST(req, { params }) {
 
         const sessionId = orderResponse.data.payment_session_id;
         
-        // Fix: Use path-based session ID for hosted checkout to avoid 404
-        const checkoutUrl = env === "PROD"
-          ? `https://payments.cashfree.com/pg/view/checkout/${sessionId}`
-          : `https://sandbox.cashfree.com/pg/view/checkout/${sessionId}`;
+        // Fix: Redirect to our own checkout page that uses the SDK
+        // This avoids 404 and "session invalid" errors from linking directly to Cashfree.
+        const baseUrl = env === "PROD" ? "https://magicscale.in" : "http://localhost:3000";
+        const checkoutUrl = `${baseUrl}/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
 
         console.log(`Generated Link for ${env}: ${checkoutUrl}`);
 

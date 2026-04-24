@@ -139,10 +139,10 @@ export async function POST(req, { params }) {
 
         const sessionId = orderResponse.data.payment_session_id;
         
-        // Fix: Redirect to our own checkout page that uses the SDK
-        // This avoids 404 and "session invalid" errors from linking directly to Cashfree.
-        const baseUrl = env === "PROD" ? "https://magicscale.in" : "http://localhost:3000";
-        const checkoutUrl = `${baseUrl}/checkout-link?session_id=${sessionId}&env=${env.toLowerCase()}`;
+        // Simple Setup: Point to our own backend-hosted checkout page
+        // This avoids 404, session invalid, and blank screen errors.
+        const { origin } = new URL(req.url);
+        const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
 
         console.log(`Generated Link for ${env}: ${checkoutUrl}`);
 
@@ -347,6 +347,56 @@ export async function GET(req, { params }) {
   // Handle user-details (already logic exists but let's wrap it if needed, 
   // currently it's handled in POST block which is weird for a search, but keeping it for compatibility)
   
+  if (action === "checkout") {
+    const { searchParams } = new URL(req.url);
+    const sessionId = searchParams.get("session_id");
+    const envParam = searchParams.get("env") || "prod";
+
+    if (!sessionId) {
+      return new Response("Missing session_id", { status: 400 });
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>MagicScale Secure Checkout</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+          <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f8fafc; }
+              .loader { border: 4px solid #f3f3f3; border-top: 4px solid #4f46e5; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin-bottom: 20px; }
+              @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+              .text { color: #1e293b; font-size: 18px; font-weight: 600; }
+              .logo { font-size: 24px; font-weight: 900; color: #4f46e5; margin-bottom: 40px; }
+          </style>
+      </head>
+      <body>
+          <div class="logo">MagicScale</div>
+          <div class="loader"></div>
+          <div class="text">Initializing Secure Payment...</div>
+          <script>
+              try {
+                  const cashfree = Cashfree({ mode: "${envParam === 'prod' || envParam === 'PROD' ? 'production' : 'sandbox'}" });
+                  cashfree.checkout({ 
+                      paymentSessionId: "${sessionId}", 
+                      redirectTarget: "_self" 
+                  });
+              } catch (e) {
+                  console.error(e);
+                  document.querySelector('.text').innerText = "Error loading payment. Please refresh.";
+                  document.querySelector('.loader').style.display = "none";
+              }
+          </script>
+      </body>
+      </html>
+    `;
+
+    return new Response(html, {
+      headers: { "Content-Type": "text/html" }
+    });
+  }
+
   return Response.json({
     message: "Cashfree API GET endpoint",
     slug,

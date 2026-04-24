@@ -10,6 +10,8 @@ const paymentSchema = new mongoose.Schema({
   plan: { type: String, required: true },
   duration: { type: Number, required: true },
   amount: { type: Number, required: true },
+  totalAmount: { type: Number }, // Total price for balance tracking
+  purpose: { type: String }, // Name of the service/purpose
   orderId: { type: String, required: true },
   status: { type: String, default: "paid" },
   timestamp: { type: Date, default: Date.now },

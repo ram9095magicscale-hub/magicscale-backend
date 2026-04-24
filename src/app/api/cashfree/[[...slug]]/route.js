@@ -104,6 +104,23 @@ export async function POST(req, { params }) {
 
       const orderId = "LNK_" + Date.now();
 
+      // 1. Find or Create User so they show up in Customers list
+      let user = await User.findOne({ email });
+      if (!user) {
+        user = await User.create({
+          name: name || "Customer",
+          email,
+          phone,
+          password: Math.random().toString(36).slice(-8), // Placeholder password
+          role: "user",
+          isVerified: true
+        });
+        console.log(`New user created during link generation: ${email}`);
+      } else if (!user.phone && phone) {
+        user.phone = phone;
+        await user.save();
+      }
+
       // Cashfree Production requires an HTTPS return URL.
       let safeReturnUrl = return_url || `https://magicscale.in/payment-success?order_id=${orderId}`;
       if (env === "PROD" && safeReturnUrl.startsWith("http://")) {
@@ -131,6 +148,7 @@ export async function POST(req, { params }) {
             },
             order_meta: {
               return_url: safeReturnUrl,
+              total_amount: (parseFloat(totalServicePrice) || finalAmount).toString(),
             },
           },
           {
@@ -211,14 +229,20 @@ export async function POST(req, { params }) {
         }
 
         // 3. Create Payment record
+        const totalAmount = statusResponse.data.order_meta?.total_amount 
+           ? parseFloat(statusResponse.data.order_meta.total_amount) 
+           : (statusResponse.data.order_amount || amount);
+
         await Payment.create({
-          user: userId && userId.includes("guest") ? null : userId,
-          name: name,
-          email: email,
-          phone: phone,
-          plan,
-          duration,
+          user: userId && userId.includes("guest") ? (user?._id || null) : (userId || user?._id || null),
+          name: name || user?.name || statusResponse.data.customer_details?.customer_name,
+          email: email || user?.email || statusResponse.data.customer_details?.customer_email,
+          phone: phone || user?.phone || statusResponse.data.customer_details?.customer_phone,
+          plan: plan || "Payment Link",
+          duration: duration || 1,
           amount: statusResponse.data.order_amount || amount,
+          totalAmount: totalAmount,
+          purpose: plan || "Service Payment",
           orderId: order_id,
           status: "paid",
           timestamp: new Date(),
@@ -322,14 +346,28 @@ export async function POST(req, { params }) {
           $or: [{ email: identifier }, { phone: identifier }]
         }).select('name email phone');
 
-        const lastPayment = await Payment.findOne({
+        // Fetch all payments for this user to calculate balance
+        const payments = await Payment.find({
           $or: [{ email: identifier }, { phone: identifier }]
         }).sort({ timestamp: -1 });
+
+        const lastPayment = payments[0] || null;
+        
+        // Calculate pending balance if last payment was partial
+        // Logic: totalServicePrice - sum of all amounts paid for this purpose
+        let pendingBalance = 0;
+        if (lastPayment && lastPayment.totalAmount) {
+            const totalPaid = payments
+                .filter(p => p.plan === lastPayment.plan)
+                .reduce((sum, p) => sum + p.amount, 0);
+            pendingBalance = Math.max(0, lastPayment.totalAmount - totalPaid);
+        }
 
         return res.json({
           success: true,
           user: user || (lastPayment ? { name: lastPayment.name, email: lastPayment.email, phone: lastPayment.phone } : null),
-          lastPayment
+          lastPayment,
+          pendingBalance
         });
       } catch (err) {
         return res.status(500).json({ success: false, message: err.message });

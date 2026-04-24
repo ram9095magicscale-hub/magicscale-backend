@@ -13,6 +13,7 @@ const paymentSchema = new mongoose.Schema({
   totalAmount: { type: Number }, // Total price for balance tracking
   purpose: { type: String }, // Name of the service/purpose
   orderId: { type: String, required: true },
+  paymentLink: { type: String }, // Store the generated link
   status: { type: String, default: "paid" },
   timestamp: { type: Date, default: Date.now },
 });

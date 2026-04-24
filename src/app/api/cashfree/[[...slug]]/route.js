@@ -138,27 +138,10 @@ export async function POST(req, { params }) {
         if (updated) await user.save();
       }
 
-      // 2. Store a PENDING payment record so it shows up in lookup
-      const totalValuation = parseFloat(totalServicePrice) || finalAmount;
-      try {
-        await Payment.create({
-          user: user?._id || null,
-          name: name || user?.name || "Customer",
-          email: normalizedEmail,
-          phone: sanitizedPhone,
-          plan: purpose || "Service Payment",
-          duration: 1,
-          amount: finalAmount,
-          totalAmount: totalValuation,
-          purpose: purpose || "Service Payment",
-          orderId: orderId,
-          status: "pending",
-          timestamp: new Date(),
-        });
-        console.log(`✅ Pending payment record created for Order ${orderId}`);
-      } catch (payErr) {
-        console.error("❌ Failed to create pending payment record:", payErr.message);
-      }
+      // User creation was here... moved up to ensure user exists
+      // No changes needed here, just ensuring I don't delete the pending record block by accident
+      // Actually, I'll remove the old pending record block from here since I moved it down.
+
 
       // Cashfree Production requires an HTTPS return URL.
       let safeReturnUrl = return_url || `https://magicscale.in/payment-success?order_id=${orderId}`;
@@ -202,25 +185,44 @@ export async function POST(req, { params }) {
 
         const sessionId = orderResponse.data.payment_session_id;
         
-        // Final Fix: Use the main domain that is whitelisted in Cashfree.
-        // We proxy /api requests through the frontend to make this work.
-        const host = req.headers["host"] || "magicscale.in";
-        const origin = env === "PROD" ? "https://magicscale.in" : `http://${host}`;
-        const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
+      // 2. Generate the URL (Moved up so we can store it)
+      const host = req.headers["host"] || "magicscale.in";
+      const origin = env === "PROD" ? "https://magicscale.in" : `http://${host}`;
+      const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
 
-        console.log(`Generated Link for ${env}: ${checkoutUrl}`);
-
-        // Note: For sandbox, the URL structure might be different or requires the SDK.
-        // However, https://sandbox.cashfree.com/pg/view/checkout/${sessionId} is the standard sandbox hosted page.
-
-        return res.json({
-          success: true,
-          link_id: orderId,
-          link_url: checkoutUrl,
-          payment_session_id: sessionId,
-          order_id: orderId,
-          message: "Payment link generated successfully via Orders API"
+      // 3. Store a PENDING payment record so it shows up in lookup
+      const totalValuation = parseFloat(totalServicePrice) || finalAmount;
+      try {
+        await Payment.create({
+          user: user?._id || null,
+          name: name || user?.name || "Customer",
+          email: normalizedEmail,
+          phone: sanitizedPhone,
+          plan: purpose || "Service Payment",
+          duration: 1,
+          amount: finalAmount,
+          totalAmount: totalValuation,
+          purpose: purpose || "Service Payment",
+          orderId: orderId,
+          paymentLink: checkoutUrl, // NOW STORED
+          status: "pending",
+          timestamp: new Date(),
         });
+        console.log(`✅ Pending payment record created with Link: ${orderId}`);
+      } catch (payErr) {
+        console.error("❌ Failed to create pending payment record:", payErr.message);
+      }
+
+      console.log(`Generated Link for ${env}: ${checkoutUrl}`);
+
+      return res.json({
+        success: true,
+        link_id: orderId,
+        link_url: checkoutUrl,
+        payment_session_id: sessionId,
+        order_id: orderId,
+        message: "Payment link generated successfully via Orders API"
+      });
       } catch (axiosErr) {
         const errorData = axiosErr.response?.data;
         console.error("Cashfree Order API Error:", JSON.stringify(errorData || axiosErr.message));

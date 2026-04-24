@@ -139,10 +139,10 @@ export async function POST(req, { params }) {
 
         const sessionId = orderResponse.data.payment_session_id;
         
-        // Updated Checkout URL for better compatibility with Production sessions
+        // Fix: Use path-based session ID for hosted checkout to avoid 404
         const checkoutUrl = env === "PROD"
-          ? `https://payments.cashfree.com/pg/view/checkout?session_id=${sessionId}`
-          : `https://sandbox.cashfree.com/pg/view/checkout?session_id=${sessionId}`;
+          ? `https://payments.cashfree.com/pg/view/checkout/${sessionId}`
+          : `https://sandbox.cashfree.com/pg/view/checkout/${sessionId}`;
 
         console.log(`Generated Link for ${env}: ${checkoutUrl}`);
 

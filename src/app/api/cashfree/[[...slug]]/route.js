@@ -147,7 +147,9 @@ export async function POST(req, { params }) {
         
         // Simple Setup: Point to our own backend-hosted checkout page
         // This avoids 404, session invalid, and blank screen errors.
-        const { origin } = new URL(req.url);
+        const host = req.headers.get("host") || "magicscale.in";
+        const protocol = req.headers.get("x-forwarded-proto") || "https";
+        const origin = `${protocol}://${host}`;
         const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
 
         console.log(`Generated Link for ${env}: ${checkoutUrl}`);
@@ -355,7 +357,8 @@ export async function GET(req, { params }) {
   // currently it's handled in POST block which is weird for a search, but keeping it for compatibility)
   
   if (action === "checkout") {
-    const { searchParams } = new URL(req.url);
+    const url = new URL(req.url, `https://${req.headers.get("host") || "magicscale.in"}`);
+    const searchParams = url.searchParams;
     const sessionId = searchParams.get("session_id");
     const envParam = searchParams.get("env") || "prod";
 

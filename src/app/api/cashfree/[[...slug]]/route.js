@@ -125,10 +125,32 @@ export async function POST(req, { params }) {
         }
       } else {
         console.log(`Found existing user: ${user._id}`);
-        if (!user.phone && phone) {
+        if (user.phone !== phone && phone) {
           user.phone = phone;
           await user.save();
         }
+      }
+
+      // 2. Store a PENDING payment record so it shows up in lookup
+      const totalValuation = parseFloat(totalServicePrice) || finalAmount;
+      try {
+        await Payment.create({
+          user: user?._id || null,
+          name: name || user?.name || "Customer",
+          email: normalizedEmail,
+          phone,
+          plan: purpose || "Service Payment",
+          duration: 1,
+          amount: finalAmount,
+          totalAmount: totalValuation,
+          purpose: purpose || "Service Payment",
+          orderId: orderId,
+          status: "pending",
+          timestamp: new Date(),
+        });
+        console.log(`✅ Pending payment record created for Order ${orderId}`);
+      } catch (payErr) {
+        console.error("❌ Failed to create pending payment record:", payErr.message);
       }
 
       // Cashfree Production requires an HTTPS return URL.
@@ -242,25 +264,37 @@ export async function POST(req, { params }) {
         const customerEmail = statusResponse.data.customer_details?.customer_email;
         const user = await User.findOne({ email: customerEmail?.toLowerCase() });
 
-        // 3. Create Payment record
-        const totalAmount = statusResponse.data.order_meta?.total_amount 
+        // 3. Update or Create Payment record
+        const totalAmountFromMeta = statusResponse.data.order_meta?.total_amount 
            ? parseFloat(statusResponse.data.order_meta.total_amount) 
            : (statusResponse.data.order_amount || amount);
 
-        await Payment.create({
-          user: userId && userId.includes("guest") ? (user?._id || null) : (userId || user?._id || null),
-          name: name || user?.name || statusResponse.data.customer_details?.customer_name,
-          email: email || user?.email || statusResponse.data.customer_details?.customer_email,
-          phone: phone || user?.phone || statusResponse.data.customer_details?.customer_phone,
-          plan: plan || "Payment Link",
-          duration: duration || 1,
-          amount: statusResponse.data.order_amount || amount,
-          totalAmount: totalAmount,
-          purpose: plan || "Service Payment",
-          orderId: order_id,
-          status: "paid",
-          timestamp: new Date(),
-        });
+        // Try to update existing pending record if it exists
+        let payment = await Payment.findOne({ orderId: order_id });
+        
+        if (payment) {
+          payment.status = "paid";
+          payment.amount = statusResponse.data.order_amount || amount;
+          payment.totalAmount = totalAmountFromMeta;
+          await payment.save();
+          console.log(`✅ Updated existing pending payment to PAID: ${order_id}`);
+        } else {
+          payment = await Payment.create({
+            user: userId && userId.includes("guest") ? (user?._id || null) : (userId || user?._id || null),
+            name: name || user?.name || statusResponse.data.customer_details?.customer_name,
+            email: email || user?.email || statusResponse.data.customer_details?.customer_email,
+            phone: phone || user?.phone || statusResponse.data.customer_details?.customer_phone,
+            plan: plan || "Payment Link",
+            duration: duration || 1,
+            amount: statusResponse.data.order_amount || amount,
+            totalAmount: totalAmountFromMeta,
+            purpose: plan || "Service Payment",
+            orderId: order_id,
+            status: "paid",
+            timestamp: new Date(),
+          });
+          console.log(`✅ Created new payment record from confirmation: ${order_id}`);
+        }
 
         // 4. Update User subscription if user exists
         if (userId && !userId.includes("guest")) {

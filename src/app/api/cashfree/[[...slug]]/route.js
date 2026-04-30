@@ -235,16 +235,17 @@ export async function POST(req, { params }) {
       // 4. Generate Short Link
       const shortId = crypto.randomBytes(3).toString("hex");
       const shortUrl = `https://magicscale.in/p/${shortId}`;
+      console.log(`[DEBUG] Attempting to create short link for ${orderId}: ${shortId}`);
 
       try {
-        await ShortLink.create({
+        const newShortLink = await ShortLink.create({
           shortId,
           originalUrl: checkoutUrl,
           orderId: orderId
         });
-        console.log(`✅ Short link created: ${shortUrl}`);
+        console.log(`✅ [DEBUG] Short link saved to DB: ${shortId} -> ${checkoutUrl}`);
       } catch (shortErr) {
-        console.error("❌ Failed to create short link:", shortErr.message);
+        console.error("❌ [DEBUG] Failed to create short link in DB:", shortErr.message);
       }
 
       return res.json({
@@ -489,18 +490,29 @@ export async function GET(req, { params }) {
   if (action === "redirect-handler") {
     return handleRequest(req, { params }, async (req, res) => {
       const { shortId } = req.query;
-      if (!shortId) return res.status(400).json({ success: false, message: "Short ID required" });
+      console.log(`[DEBUG] Incoming redirect request for shortId: ${shortId}`);
+      
+      if (!shortId) {
+        console.log(`[DEBUG] Missing shortId in request`);
+        return res.status(400).json({ success: false, message: "Short ID required" });
+      }
 
       try {
         const link = await ShortLink.findOne({ shortId });
-        if (!link) return res.json({ success: false, message: "Link not found" });
+        if (!link) {
+          console.log(`[DEBUG] No link found in DB for shortId: ${shortId}`);
+          return res.json({ success: false, message: "Link not found in database" });
+        }
 
+        console.log(`[DEBUG] Found link! Redirecting to: ${link.originalUrl}`);
+        
         // Increment visit count
         link.visits = (link.visits || 0) + 1;
         await link.save();
 
         return res.json({ success: true, url: link.originalUrl });
       } catch (err) {
+        console.error(`[DEBUG] Error in redirect-handler:`, err.message);
         return res.status(500).json({ success: false, message: err.message });
       }
     });

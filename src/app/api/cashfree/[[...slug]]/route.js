@@ -1,6 +1,8 @@
 import axios from "axios";
+import crypto from "crypto";
 import User from "@/models/User";
 import Payment from "@/models/Payment";
+import ShortLink from "@/models/ShortLink";
 import { sendPaymentEmails, sendPaymentLinkEmail } from "@/utils/email";
 import { handleRequest } from "@/lib/route-adapter";
 
@@ -230,13 +232,28 @@ export async function POST(req, { params }) {
 
       console.log(`Generated Link for ${env}: ${checkoutUrl}`);
 
+      // 4. Generate Short Link
+      const shortId = crypto.randomBytes(3).toString("hex");
+      const shortUrl = `https://magicscale.in/p/${shortId}`;
+
+      try {
+        await ShortLink.create({
+          shortId,
+          originalUrl: checkoutUrl,
+          orderId: orderId
+        });
+        console.log(`✅ Short link created: ${shortUrl}`);
+      } catch (shortErr) {
+        console.error("❌ Failed to create short link:", shortErr.message);
+      }
+
       return res.json({
         success: true,
         link_id: orderId,
-        link_url: checkoutUrl,
+        link_url: shortUrl, // Return short URL
         payment_session_id: sessionId,
         order_id: orderId,
-        message: "Payment link generated successfully via Orders API"
+        message: "Payment link generated successfully with shortener"
       });
       } catch (axiosErr) {
         const errorData = axiosErr.response?.data;
@@ -463,6 +480,26 @@ export async function GET(req, { params }) {
           lastPayment,
           pendingBalance
         });
+      } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+      }
+    });
+  }
+
+  if (action === "redirect-handler") {
+    return handleRequest(req, { params }, async (req, res) => {
+      const { shortId } = req.query;
+      if (!shortId) return res.status(400).json({ success: false, message: "Short ID required" });
+
+      try {
+        const link = await ShortLink.findOne({ shortId });
+        if (!link) return res.json({ success: false, message: "Link not found" });
+
+        // Increment visit count
+        link.visits = (link.visits || 0) + 1;
+        await link.save();
+
+        return res.json({ success: true, url: link.originalUrl });
       } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
       }

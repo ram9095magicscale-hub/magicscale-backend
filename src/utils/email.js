@@ -131,15 +131,46 @@ export const sendPaymentEmails = async ({ name, email, plan, duration, amount, o
     to: email,
     subject: '🎉 Payment Successful - MagicScale',
     html: `
-      <h2>Hi ${name},</h2>
-      <p>Thanks for your purchase of the <strong>${plan}</strong> plan.</p>
-      <ul>
-        <li><strong>Duration:</strong> ${duration} months</li>
-        <li><strong>Amount:</strong> ₹${amount}</li>
-        <li><strong>Order ID:</strong> ${orderId}</li>
-      </ul>
-      <p>We’ve started processing your request. Thank you!</p>
-      <br/><p>— MagicScale Team</p>
+      <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 600px; margin: auto; background: #ffffff; border-radius: 24px; overflow: hidden; border: 1px solid #f1f5f9; box-shadow: 0 20px 40px rgba(0,0,0,0.08);">
+        <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 60px 40px; text-align: center; color: white;">
+          <div style="background: rgba(255,255,255,0.2); width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px; border: 1px solid rgba(255,255,255,0.3); backdrop-filter: blur(10px);">
+             <span style="font-size: 40px;">✅</span>
+          </div>
+          <h1 style="margin: 0; font-size: 32px; font-weight: 900; letter-spacing: -1px;">Payment Successful!</h1>
+          <p style="opacity: 0.9; margin-top: 10px; font-size: 16px; font-weight: 500;">Order ID: ${orderId}</p>
+        </div>
+        <div style="padding: 40px; background: #ffffff;">
+          <h2 style="color: #0f172a; font-size: 22px; margin-bottom: 24px; font-weight: 800;">Hi ${name},</h2>
+          <p style="color: #475569; line-height: 1.8; font-size: 16px; margin-bottom: 32px;">
+            Thank you for your trust in <strong>MagicScale</strong>. Your payment has been processed successfully, and your access to <strong>${plan}</strong> is now active.
+          </p>
+          
+          <div style="background: #f8fafc; border-radius: 20px; padding: 32px; border: 1px solid #e2e8f0; margin-bottom: 32px;">
+            <p style="margin: 0 0 16px 0; color: #64748b; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;">Purchase Details</p>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+              <span style="color: #475569; font-weight: 500;">Service Plan</span>
+              <span style="color: #0f172a; font-weight: 800;">${plan}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+              <span style="color: #475569; font-weight: 500;">Duration</span>
+              <span style="color: #0f172a; font-weight: 800;">${duration} Month(s)</span>
+            </div>
+            <div style="height: 1px; background: #e2e8f0; margin: 16px 0;"></div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: #475569; font-weight: 700;">Amount Paid</span>
+              <span style="color: #4f46e5; font-weight: 900; font-size: 20px;">₹${amount}</span>
+            </div>
+          </div>
+
+          <div style="text-align: center;">
+            <a href="https://magicscale.in/profile" style="display: inline-block; background: #0f172a; color: white; padding: 18px 40px; text-decoration: none; border-radius: 14px; font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; transition: all 0.3s ease; box-shadow: 0 10px 20px rgba(0,0,0,0.1);">Go to Dashboard</a>
+          </div>
+        </div>
+        <div style="background: #f1f5f9; padding: 32px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #e2e8f0;">
+          <p style="margin-bottom: 8px; font-weight: 600;">© 2024 MagicScale. All rights reserved.</p>
+          <p>Need help? Contact us at support@magicscale.in</p>
+        </div>
+      </div>
     `,
   };
 
@@ -255,33 +286,48 @@ export const sendPaymentLinkEmail = async ({ name, email, plan, amount, link }) 
     to: email,
     subject: `🔗 Your Payment Link for ${plan} - MagicScale`,
     html: `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eef2f6; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
-        <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 30px; text-align: center; color: white;">
-          <h1 style="margin: 0; font-size: 24px;">MagicScale</h1>
+      <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 600px; margin: auto; background: #ffffff; border-radius: 28px; overflow: hidden; border: 1px solid #f1f5f9; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);">
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 50px 40px; text-align: center; color: white;">
+          <h1 style="margin: 0; font-size: 28px; font-weight: 900; letter-spacing: -0.5px;">MagicScale</h1>
+          <div style="height: 4px; width: 40px; background: #4f46e5; margin: 20px auto; border-radius: 2px;"></div>
+          <p style="opacity: 0.8; font-size: 16px; font-weight: 500;">Secure Payment Request</p>
         </div>
-        <div style="padding: 40px; background: white;">
-          <h2 style="color: #1e293b; font-size: 20px; margin-bottom: 20px;">Hi ${name},</h2>
-          <p style="color: #475569; line-height: 1.7; font-size: 16px;">
-            Please find the payment link for <strong>${plan}</strong> below:
+        <div style="padding: 40px; background: #ffffff;">
+          <h2 style="color: #0f172a; font-size: 24px; margin-bottom: 20px; font-weight: 800;">Hello ${name},</h2>
+          <p style="color: #475569; line-height: 1.8; font-size: 16px; margin-bottom: 30px;">
+            A payment link has been generated for your request regarding <strong>${plan}</strong>. Please use the link below to complete your transaction securely.
           </p>
-          <div style="background: #f8fafc; border-radius: 12px; padding: 25px; margin: 30px 0; border-left: 4px solid #4f46e5;">
-            <p style="margin: 0 0 10px 0; color: #64748b; font-[12px] uppercase font-bold tracking-wider">Plan Details</p>
-            <p style="margin: 0; color: #1e293b; font-size: 18px; font-weight: 800;">₹${amount}</p>
+          
+          <div style="background: linear-gradient(to right, #f8fafc, #f1f5f9); border-radius: 20px; padding: 30px; border-left: 6px solid #4f46e5; margin-bottom: 35px;">
+            <p style="margin: 0 0 10px 0; color: #64748b; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;">Amount to Pay</p>
+            <div style="color: #0f172a; font-size: 36px; font-weight: 900; display: flex; align-items: center;">
+              <span style="font-size: 24px; margin-right: 4px;">₹</span>${amount}
+            </div>
+            <p style="margin: 15px 0 0 0; color: #64748b; font-size: 14px; font-weight: 500;">For: ${plan}</p>
           </div>
-          <div style="text-align: center; margin-top: 35px;">
-            <a href="${link}" style="display: inline-block; background: #4f46e5; color: white; padding: 14px 35px; text-decoration: none; border-radius: 10px; font-weight: bold; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">Complete Payment</a>
+
+          <div style="text-align: center; margin-bottom: 35px;">
+            <a href="${link}" style="display: inline-block; background: #4f46e5; color: white; padding: 20px 45px; text-decoration: none; border-radius: 16px; font-weight: 800; font-size: 15px; box-shadow: 0 15px 30px rgba(79, 70, 229, 0.2); transition: transform 0.2s ease;">Complete Secure Payment</a>
           </div>
-          <p style="color: #475569; font-size: 14px; margin-top: 30px;">
-            If the button doesn't work, copy this link: <br/>
-            <span style="color: #4f46e5; word-break: break-all;">${link}</span>
+
+          <div style="background: #fff7ed; border-radius: 12px; padding: 15px; border: 1px solid #ffedd5; margin-bottom: 30px;">
+            <p style="margin: 0; color: #9a3412; font-size: 13px; line-height: 1.5;">
+              <strong>Note:</strong> This link is secure and will expire shortly. Do not share this link with anyone else.
+            </p>
+          </div>
+
+          <p style="color: #94a3b8; font-size: 13px; line-height: 1.6;">
+            If the button above doesn't work, copy and paste this URL into your browser:<br/>
+            <span style="color: #4f46e5; word-break: break-all; font-weight: 500;">${link}</span>
           </p>
-          <p style="color: #475569; font-size: 16px; margin-top: 40px; font-weight: 500;">
-            Thank you for choosing MagicScale!<br/><br/>
-            Best Regards,<br/>
-            <strong>Vikas</strong><br/>
-            MagicScale Team<br/>
-            <a href="https://magicscale.in" style="color: #4f46e5; text-decoration: none;">www.magicscale.in</a>
-          </p>
+
+          <div style="margin-top: 40px; pt-30px; border-top: 1px solid #f1f5f9; padding-top: 30px;">
+             <p style="color: #0f172a; font-weight: 800; margin-bottom: 5px;">Team MagicScale</p>
+             <p style="color: #64748b; font-size: 14px; margin: 0;">Empowering Food Businesses</p>
+          </div>
+        </div>
+        <div style="background: #f8fafc; padding: 30px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #f1f5f9;">
+          <p>© 2024 MagicScale. Trusted by 500+ Indian Foodpreneurs.</p>
         </div>
       </div>
     `,

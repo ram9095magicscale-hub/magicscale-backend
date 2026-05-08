@@ -14,7 +14,8 @@ const paymentSchema = new mongoose.Schema({
   purpose: { type: String }, // Name of the service/purpose
   orderId: { type: String, required: true },
   paymentLink: { type: String }, // Store the generated link
-  status: { type: String, default: "paid" },
+  status: { type: String, default: "pending" },
+  shortId: { type: String, unique: true, sparse: true },
   timestamp: { type: Date, default: Date.now },
 });
 

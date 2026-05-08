@@ -1,9 +1,8 @@
 import axios from "axios";
-import crypto from "crypto";
 import User from "@/models/User";
 import Payment from "@/models/Payment";
-import ShortLink from "@/models/ShortLink";
 import { sendPaymentEmails, sendPaymentLinkEmail } from "@/utils/email";
+import { sendWhatsAppTemplate } from "@/utils/whatsapp";
 import { handleRequest } from "@/lib/route-adapter";
 
 /**
@@ -187,12 +186,16 @@ export async function POST(req, { params }) {
 
         const sessionId = orderResponse.data.payment_session_id;
         
-      // 2. Generate the URL (Moved up so we can store it)
+      // 2. Generate the URL (Shortened Version)
+      const shortId = Math.random().toString(36).substring(2, 8); // Random 6 char ID
       const host = req.headers["host"] || "magicscale.in";
-      const origin = env === "PROD" ? "https://magicscale.in" : `http://${host}`;
+      const origin = env === "PROD" ? "https://magicscale.in" : (host.includes("localhost") ? `http://${host}` : `https://${host}`);
+      const shortUrl = `${origin}/p/${shortId}`;
       const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
+      
+      console.log(`🔗 Link Generation: id=${orderId} shortId=${shortId} origin=${origin}`);
 
-      // 3. Store a PENDING payment record so it shows up in lookup
+      // 3. Store a PENDING payment record
       const totalValuation = parseFloat(totalServicePrice) || finalAmount;
       try {
         await Payment.create({
@@ -206,11 +209,12 @@ export async function POST(req, { params }) {
           totalAmount: totalValuation,
           purpose: purpose || "Service Payment",
           orderId: orderId,
-          paymentLink: checkoutUrl, // NOW STORED
+          shortId: shortId, // STORE SHORT ID
+          paymentLink: checkoutUrl, 
           status: "pending",
           timestamp: new Date(),
         });
-        console.log(`✅ Pending payment record created with Link: ${orderId}`);
+        console.log(`✅ Pending payment record created with Short URL: ${shortUrl}`);
         
         // AUTO-SEND EMAIL
         try {
@@ -219,42 +223,36 @@ export async function POST(req, { params }) {
             email: normalizedEmail,
             plan: purpose || "Service Payment",
             amount: finalAmount,
-            link: checkoutUrl
+            link: shortUrl // SEND SHORT LINK
           });
-          console.log(`📧 Auto-email sent to ${normalizedEmail}`);
+          console.log(`📧 Auto-email sent with short link to ${normalizedEmail}`);
         } catch (mailErr) {
           console.error("❌ Auto-email failed:", mailErr.message);
+        }
+
+        // AUTO-SEND WHATSAPP (AiSensy)
+        try {
+          await sendWhatsAppTemplate(
+            sanitizedPhone || phone, 
+            "payment_link_campaign", 
+            name || "Customer",
+            [name || "Customer", purpose || "Service", finalAmount.toString(), shortUrl] // SEND SHORT LINK
+          );
+        } catch (waErr) {
+          console.error("❌ Auto-WhatsApp failed:", waErr.message);
         }
 
       } catch (payErr) {
         console.error("❌ Failed to create pending payment record:", payErr.message);
       }
 
-      console.log(`Generated Link for ${env}: ${checkoutUrl}`);
-
-      // 4. Generate Short Link
-      const shortId = crypto.randomBytes(3).toString("hex");
-      const shortUrl = `https://magicscale.in/p/${shortId}`;
-      console.log(`[DEBUG] Attempting to create short link for ${orderId}: ${shortId}`);
-
-      try {
-        const newShortLink = await ShortLink.create({
-          shortId,
-          originalUrl: checkoutUrl,
-          orderId: orderId
-        });
-        console.log(`✅ [DEBUG] Short link saved to DB: ${shortId} -> ${checkoutUrl}`);
-      } catch (shortErr) {
-        console.error("❌ [DEBUG] Failed to create short link in DB:", shortErr.message);
-      }
-
       return res.json({
         success: true,
         link_id: orderId,
-        link_url: shortUrl, // Return short URL
+        link_url: shortUrl, // RETURN SHORT URL
         payment_session_id: sessionId,
         order_id: orderId,
-        message: "Payment link generated successfully with shortener"
+        message: "Payment link generated successfully"
       });
       } catch (axiosErr) {
         const errorData = axiosErr.response?.data;
@@ -299,8 +297,8 @@ export async function POST(req, { params }) {
 
         // 2. Check if payment already recorded to avoid duplicates
         const existingPayment = await Payment.findOne({ orderId: order_id });
-        if (existingPayment) {
-          return res.json({ success: true, message: "Payment already processed" });
+        if (existingPayment && existingPayment.status === "paid") {
+          return res.json({ success: true, message: "Payment already processed and marked as PAID" });
         }
 
         // Fetch user if not provided (for link-based payments)
@@ -350,12 +348,19 @@ export async function POST(req, { params }) {
           });
         }
 
-        // 5. Send confirmation emails
+        // 5. Send confirmation emails & WhatsApp
         try {
           await sendPaymentEmails({ name, email, plan, duration, amount, orderId: order_id });
-        } catch (emailErr) {
-          console.error("Error sending payment emails:", emailErr);
-          // Don't fail the whole request if email fails
+          
+          // Redundant WhatsApp Confirmation (AiSensy)
+          await sendWhatsAppTemplate(
+            phone || statusResponse.data.customer_details?.customer_phone,
+            "payment_success_campaign",
+            name || statusResponse.data.customer_details?.customer_name || "Customer",
+            [name || statusResponse.data.customer_details?.customer_name || "Customer", (statusResponse.data.order_amount || amount).toString(), order_id]
+          );
+        } catch (err) {
+          console.error("Error sending payment notifications:", err.message);
         }
 
         res.json({ success: true, message: "Payment confirmed successfully" });
@@ -376,23 +381,35 @@ export async function POST(req, { params }) {
       const payload = req.body;
       console.log("🔔 CASHFREE WEBHOOK RECEIVED:", JSON.stringify(payload, null, 2));
 
-      // Standard NextGen Webhook Structure (2022-09-01 onwards)
-      // data.order.order_id, data.payment.payment_status, etc.
-      const orderData = payload.data?.order;
-      const paymentData = payload.data?.payment;
-      const customerData = payload.data?.customer_details;
+      // Handle both standard NextGen (payload.data) and Legacy (flat payload) structures
+      const orderData = payload.data?.order || payload;
+      const paymentData = payload.data?.payment || payload;
+      const customerData = payload.data?.customer_details || payload;
 
-      const order_id = orderData?.order_id;
-      const order_amount = orderData?.order_amount;
-      const payment_status = paymentData?.payment_status || orderData?.order_status; // Handle variations
+      const order_id = orderData?.order_id || payload.orderId || payload.order_id;
+      const order_amount = orderData?.order_amount || payload.orderAmount || payload.order_amount;
+      const payment_status = paymentData?.payment_status || orderData?.order_status || payload.txStatus || payload.payment_status;
 
       if (payment_status === "SUCCESS" || payment_status === "PAID") {
         console.log(`✅ Webhook: Payment Success for Order ${order_id}`);
         
-        const existingPayment = await Payment.findOne({ orderId: order_id });
-        if (!existingPayment) {
+        let payment = await Payment.findOne({ orderId: order_id });
+        
+        if (payment) {
+          if (payment.status === "paid") {
+            console.log(`ℹ️ Payment for Order ${order_id} is already marked as PAID. skipping.`);
+            return res.json({ status: "OK", message: "Already processed" });
+          }
+          
+          // Update existing pending record
+          payment.status = "paid";
+          if (order_amount) payment.amount = order_amount;
+          await payment.save();
+          console.log(`📝 Updated existing payment to PAID for Order ${order_id}`);
+        } else {
+          // Create new record if not found (fallback)
           console.log(`📝 Recording new payment for Order ${order_id}`);
-          await Payment.create({
+          payment = await Payment.create({
             name: customerData?.customer_name || "Customer",
             email: customerData?.customer_email || "customer@example.com",
             phone: customerData?.customer_phone || "0000000000",
@@ -403,21 +420,33 @@ export async function POST(req, { params }) {
             status: "paid",
             timestamp: new Date(),
           });
+        }
 
-          try {
-            await sendPaymentEmails({
-              name: customerData?.customer_name,
-              email: customerData?.customer_email,
-              plan: "Payment Link",
-              amount: order_amount,
-              orderId: order_id
-            });
-            console.log(`📧 Confirmation email sent for Order ${order_id}`);
-          } catch (e) {
-            console.error("📧 Email sending failed in webhook:", e.message);
-          }
-        } else {
-          console.log(`ℹ️ Payment for Order ${order_id} already exists, skipping.`);
+        // Send notifications (for both new and updated records)
+        try {
+          await sendPaymentEmails({
+            name: payment.name || customerData?.customer_name,
+            email: payment.email || customerData?.customer_email,
+            plan: payment.plan || "Payment Link",
+            amount: payment.amount || order_amount,
+            orderId: order_id
+          });
+          console.log(`📧 Confirmation email sent for Order ${order_id}`);
+        } catch (e) {
+          console.error("📧 Email sending failed in webhook:", e.message);
+        }
+
+        // SEND CONFIRMATION WHATSAPP (AiSensy)
+        try {
+          // Campaign: payment_success_campaign
+          await sendWhatsAppTemplate(
+            payment.phone || customerData?.customer_phone,
+            "payment_success_campaign",
+            payment.name || customerData?.customer_name || "Customer",
+            [payment.name || customerData?.customer_name || "Customer", (payment.amount || order_amount).toString(), order_id]
+          );
+        } catch (waErr) {
+          console.error("❌ Confirmation WhatsApp failed in webhook:", waErr.message);
         }
       } else {
         console.log(`⚠️ Webhook: Payment status is ${payment_status} for Order ${order_id}`);
@@ -437,6 +466,31 @@ export async function GET(req, { params }) {
       status: "active",
       message: "Webhook endpoint is live. Use POST for actual notifications.",
       url: req.url
+    });
+  }
+
+  if (action === "redirect-handler") {
+    return handleRequest(req, { params }, async (req, res) => {
+      const { shortId } = req.query;
+      console.log(`🔍 Redirect Lookup: shortId=${shortId}`);
+      if (!shortId) return res.status(400).json({ success: false, message: "Short ID required" });
+
+      try {
+        const payment = await Payment.findOne({ shortId });
+        if (!payment || !payment.paymentLink) {
+          console.log(`❌ Redirect failed: shortId=${shortId} not found`);
+          return res.status(404).json({ success: false, message: "Payment link not found or expired" });
+        }
+
+        console.log(`✅ Redirect success: shortId=${shortId} -> ${payment.paymentLink}`);
+        return res.json({
+          success: true,
+          url: payment.paymentLink
+        });
+      } catch (err) {
+        console.error(`🔥 Redirect Error:`, err.message);
+        return res.status(500).json({ success: false, message: err.message });
+      }
     });
   }
 
@@ -482,37 +536,6 @@ export async function GET(req, { params }) {
           pendingBalance
         });
       } catch (err) {
-        return res.status(500).json({ success: false, message: err.message });
-      }
-    });
-  }
-
-  if (action === "redirect-handler") {
-    return handleRequest(req, { params }, async (req, res) => {
-      const { shortId } = req.query;
-      console.log(`[DEBUG] Incoming redirect request for shortId: ${shortId}`);
-      
-      if (!shortId) {
-        console.log(`[DEBUG] Missing shortId in request`);
-        return res.status(400).json({ success: false, message: "Short ID required" });
-      }
-
-      try {
-        const link = await ShortLink.findOne({ shortId });
-        if (!link) {
-          console.log(`[DEBUG] No link found in DB for shortId: ${shortId}`);
-          return res.json({ success: false, message: "Link not found in database" });
-        }
-
-        console.log(`[DEBUG] Found link! Redirecting to: ${link.originalUrl}`);
-        
-        // Increment visit count
-        link.visits = (link.visits || 0) + 1;
-        await link.save();
-
-        return res.json({ success: true, url: link.originalUrl });
-      } catch (err) {
-        console.error(`[DEBUG] Error in redirect-handler:`, err.message);
         return res.status(500).json({ success: false, message: err.message });
       }
     });

@@ -17,6 +17,7 @@ const paymentSchema = new mongoose.Schema({
   status: { type: String, default: "pending" },
   shortId: { type: String, unique: true, sparse: true },
   timestamp: { type: Date, default: Date.now },
+  lastReminderAt: { type: Date },
 });
 
 export default mongoose.models.Payment || mongoose.model("Payment", paymentSchema);

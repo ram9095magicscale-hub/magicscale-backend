@@ -280,11 +280,13 @@ export const sendNewsletterEmail = async (subscribers, blog) => {
 };
 
 // ✅ New: Send Payment Link Email
-export const sendPaymentLinkEmail = async ({ name, email, plan, amount, link }) => {
+export const sendPaymentLinkEmail = async ({ name, email, plan, amount, link, isReminder = false }) => {
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
-    subject: `🔗 Your Payment Link for ${plan} - MagicScale`,
+    subject: isReminder 
+      ? `⏰ Reminder: Complete your payment for ${plan} - MagicScale`
+      : `🔗 Your Payment Link for ${plan} - MagicScale`,
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 600px; margin: auto; background: #ffffff; border-radius: 28px; overflow: hidden; border: 1px solid #f1f5f9; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);">
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 50px 40px; text-align: center; color: white;">

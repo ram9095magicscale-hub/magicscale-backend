@@ -1,0 +1,29 @@
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import mongoose from 'mongoose';
+
+// Load env vars
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Import utilities using relative paths since this is a standalone script
+// Note: We need to point to the built/transpiled files or use a loader if using aliases
+// For simplicity, we will just redefine the logic or use relative imports if possible.
+// However, since Payment.js and email.js use imports, we might need a loader.
+
+// ALTERNATIVE: Just tell the user to use the API route with a simple curl command in their crontab.
+// That is MUCH cleaner for Next.js.
+
+/*
+Example Crontab entry:
+0 0 * * * curl -X GET "http://localhost:3000/api/cron/reminders" -H "Authorization: Bearer magicscale_cron_secret_2024"
+*/
+
+console.log("Next.js Cron Reminder utility initialized.");
+console.log("To run this task, you can use the API route:");
+console.log("URL: /api/cron/reminders");
+console.log("Method: GET");
+console.log("Header: Authorization: Bearer " + (process.env.CRON_SECRET || "your_secret"));

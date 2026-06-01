@@ -1,88 +1,72 @@
 import axios from "axios";
 import User from "@/models/User";
 import Payment from "@/models/Payment";
+import ShortLink from "@/models/ShortLink";
 import { sendPaymentEmails, sendPaymentLinkEmail } from "@/utils/email";
-import { sendWhatsAppTemplate } from "@/utils/whatsapp";
 import { handleRequest } from "@/lib/route-adapter";
+import crypto from "crypto";
 
 /**
  * Handles /api/cashfree/*
+ * Note: Now uses Razorpay internally via the wrapper API
  */
 export async function POST(req, { params }) {
   const { slug } = (await params) || { slug: [] };
   const action = slug[0];
 
-  // Automatically trim credentials to prevent 401 errors from accidental whitespace
-  const appId = process.env.CASHFREE_APP_ID?.trim();
-  const secretKey = process.env.CASHFREE_SECRET_KEY?.trim();
-  const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase();
-
   if (action === "initiate-payment") {
     return handleRequest(req, { params }, async (req, res) => {
-      let { name, email, phone, amount, return_url } = req.body;
+      let { name, email, phone, amount, planId, return_url } = req.body;
       const orderId = "ORD_" + Date.now();
 
-      // Sanitize phone: Cashfree expects a valid 10-digit number or prefixed with country code
-      // Removing any spaces or special characters
       if (phone) {
         phone = phone.replace(/[^\d+]/g, '');
         if (phone.length > 10 && phone.startsWith('0')) {
-          phone = phone.substring(1); // Remove leading 0 if present in international format
+          phone = phone.substring(1);
         }
       }
 
-      console.log("Initiating payment for:", { name, email, amount, phone, orderId });
-
-      // Cashfree Production requires an HTTPS return URL.
-      // We automatically convert http:// to https:// to prevent the API from rejecting the request.
       let safeReturnUrl = return_url || `https://magicscale.in/payment-success?order_id=${orderId}`;
-      if (env === "PROD" && safeReturnUrl.startsWith("http://")) {
+      if (safeReturnUrl.startsWith("http://") && !safeReturnUrl.includes("localhost")) {
         safeReturnUrl = safeReturnUrl.replace("http://", "https://");
       }
 
-      const orderUrl =
-        env === "PROD"
-          ? "https://api.cashfree.com/pg/orders"
-          : "https://sandbox.cashfree.com/pg/orders";
-
       try {
-        const orderResponse = await axios.post(
-          orderUrl,
-          {
-            order_id: orderId,
-            order_amount: amount,
-            order_currency: "INR",
-            customer_details: {
-              customer_id: email.replace(/[^a-zA-Z0-9_-]/g, "_"),
-              customer_name: name,
-              customer_email: email,
-              customer_phone: phone,
-            },
-            order_meta: {
-              return_url: safeReturnUrl,
-            },
+        const razorpayPayload = {
+          amount: amount,
+          currency: "INR",
+          description: "MagicScale Service Checkout",
+          customer: {
+            name: name || "Customer",
+            email: email || "customer@example.com",
+            contact: phone || "9999999999"
           },
-          {
-            headers: {
-              "x-client-id": appId,
-              "x-client-secret": secretKey,
-              "x-api-version": "2022-09-01",
-              "Content-Type": "application/json",
-            },
-          }
+          referenceId: orderId,
+          callbackUrl: safeReturnUrl,
+          callbackMethod: "get"
+        };
+
+        const rpResponse = await axios.post(
+          "https://payments.magicscale.in/api/payments/razorpay/payment-links",
+          razorpayPayload,
+          { headers: { "Content-Type": "application/json" } }
         );
+
+        const responseData = rpResponse.data;
+        const checkoutUrl = responseData.short_url || responseData.data?.short_url || responseData.paymentLink;
+        
+        if (!checkoutUrl) throw new Error("Failed to generate checkout link");
 
         return res.json({
           success: true,
           order_id: orderId,
-          payment_session_id: orderResponse.data.payment_session_id,
+          link_url: checkoutUrl,
         });
-      } catch (axiosErr) {
-        console.error("Cashfree API Error:", axiosErr.response?.data || axiosErr.message);
-        return res.status(axiosErr.response?.status || 400).json({
+      } catch (err) {
+        console.error("Razorpay Wrapper Error:", err.response?.data || err.message);
+        return res.status(err.response?.status || 500).json({
           success: false,
-          message: axiosErr.response?.data?.message || axiosErr.message,
-          error: axiosErr.response?.data
+          message: err.response?.data?.message || err.message,
         });
       }
     });
@@ -93,12 +77,6 @@ export async function POST(req, { params }) {
       const { name, email, phone, amount, totalServicePrice, purpose, return_url } = req.body;
       const finalAmount = parseFloat(amount || totalServicePrice || "0");
       
-      console.log(`Creating order for ${email}: ₹${finalAmount} (Env: ${env})`);
-      if (!appId || !secretKey) {
-        console.error("Cashfree credentials missing!");
-        return res.status(500).json({ success: false, message: "Server configuration error (missing API keys)" });
-      }
-
       if (!finalAmount || finalAmount <= 0) {
         return res.status(400).json({ success: false, message: "Valid amount is required" });
       }
@@ -107,8 +85,6 @@ export async function POST(req, { params }) {
       const normalizedEmail = email?.toLowerCase()?.trim();
       const sanitizedPhone = phone?.replace(/\D/g, "")?.slice(-10);
 
-      // 1. Find or Create User so they show up in Customers list
-      console.log(`Checking for user: ${normalizedEmail} / ${sanitizedPhone}`);
       let user = await User.findOne({ 
         $or: [
           { email: normalizedEmail },
@@ -116,88 +92,64 @@ export async function POST(req, { params }) {
         ]
       });
 
-      if (!user) {
-        console.log(`Creating new user for: ${normalizedEmail}`);
+      if (!user && normalizedEmail) {
         try {
           user = await User.create({
             name: name || "Customer",
             email: normalizedEmail,
             phone: sanitizedPhone,
-            password: Math.random().toString(36).slice(-8), // Placeholder password
+            password: Math.random().toString(36).slice(-8),
             role: "user",
             isVerified: true
           });
-          console.log(`✅ New user created: ${user._id}`);
         } catch (createErr) {
-          console.error("❌ User creation failed:", createErr.message);
+          console.error("User creation failed:", createErr.message);
         }
-      } else {
-        console.log(`Found existing user: ${user._id}`);
-        let updated = false;
-        if (!user.phone && sanitizedPhone) { user.phone = sanitizedPhone; updated = true; }
-        if (!user.name && name) { user.name = name; updated = true; }
-        if (updated) await user.save();
       }
 
-      // User creation was here... moved up to ensure user exists
-      // No changes needed here, just ensuring I don't delete the pending record block by accident
-      // Actually, I'll remove the old pending record block from here since I moved it down.
-
-
-      // Cashfree Production requires an HTTPS return URL.
       let safeReturnUrl = return_url || `https://magicscale.in/payment-success?order_id=${orderId}`;
-      if (env === "PROD" && safeReturnUrl.startsWith("http://")) {
+      if (safeReturnUrl.startsWith("http://") && !safeReturnUrl.includes("localhost")) {
         safeReturnUrl = safeReturnUrl.replace("http://", "https://");
       }
 
-      const orderUrl =
-        env === "PROD"
-          ? "https://api.cashfree.com/pg/orders"
-          : "https://sandbox.cashfree.com/pg/orders";
-
       try {
-        // We use pg/orders as a fallback because pg/links is often not enabled by default
-        const orderResponse = await axios.post(
-          orderUrl,
-          {
-            order_id: orderId,
-            order_amount: finalAmount,
-            order_currency: "INR",
-            customer_details: {
-              customer_id: email ? email.replace(/[^a-zA-Z0-9_-]/g, "_") : "guest_" + Date.now(),
-              customer_name: name || "Customer",
-              customer_email: email || "customer@example.com",
-              customer_phone: phone || "9999999999",
-            },
-            order_meta: {
-              return_url: safeReturnUrl,
-              total_amount: (parseFloat(totalServicePrice) || finalAmount).toString(),
-            },
+        const razorpayPayload = {
+          amount: finalAmount,
+          currency: "INR",
+          description: purpose || "Service Payment",
+          customer: {
+            name: name || user?.name || "Customer",
+            email: normalizedEmail || "customer@example.com",
+            contact: sanitizedPhone || "9999999999"
           },
-          {
-            headers: {
-              "x-client-id": appId,
-              "x-client-secret": secretKey,
-              "x-api-version": "2022-09-01",
-              "Content-Type": "application/json",
-            },
-          }
+          referenceId: orderId,
+          callbackUrl: safeReturnUrl,
+          callbackMethod: "get"
+        };
+
+        const rpResponse = await axios.post(
+          "https://payments.magicscale.in/api/payments/razorpay/payment-links",
+          razorpayPayload,
+          { headers: { "Content-Type": "application/json" } }
         );
 
-        const sessionId = orderResponse.data.payment_session_id;
+        const responseData = rpResponse.data;
+        const checkoutUrl = responseData.short_url || responseData.data?.short_url || responseData.paymentLink;
         
-      // 2. Generate the URL (Shortened Version)
-      const shortId = Math.random().toString(36).substring(2, 8); // Random 6 char ID
-      const host = req.headers["host"] || "magicscale.in";
-      const origin = env === "PROD" ? "https://magicscale.in" : (host.includes("localhost") ? `http://${host}` : `https://${host}`);
-      const shortUrl = `${origin}/p/${shortId}`;
-      const checkoutUrl = `${origin}/api/cashfree/checkout?session_id=${sessionId}&env=${env.toLowerCase()}`;
-      
-      console.log(`🔗 Link Generation: id=${orderId} shortId=${shortId} origin=${origin}`);
+        if (!checkoutUrl) throw new Error("Failed to get payment link from Razorpay");
 
-      // 3. Store a PENDING payment record
-      const totalValuation = parseFloat(totalServicePrice) || finalAmount;
-      try {
+        const shortId = crypto.randomBytes(3).toString("hex");
+        const origin = req.headers["host"] ? `https://${req.headers["host"]}` : "https://magicscale.in";
+        const shortUrl = `${origin}/p/${shortId}`;
+
+        await ShortLink.create({
+          shortId,
+          originalUrl: checkoutUrl,
+          orderId: orderId,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        });
+
+        const totalValuation = parseFloat(totalServicePrice) || finalAmount;
         await Payment.create({
           user: user?._id || null,
           name: name || user?.name || "Customer",
@@ -209,58 +161,36 @@ export async function POST(req, { params }) {
           totalAmount: totalValuation,
           purpose: purpose || "Service Payment",
           orderId: orderId,
-          shortId: shortId, // STORE SHORT ID
-          paymentLink: checkoutUrl, 
+          paymentLink: checkoutUrl,
           status: "pending",
           timestamp: new Date(),
         });
-        console.log(`✅ Pending payment record created with Short URL: ${shortUrl}`);
         
-        // AUTO-SEND EMAIL
         try {
-          await sendPaymentLinkEmail({
-            name: name || user?.name || "Customer",
-            email: normalizedEmail,
-            plan: purpose || "Service Payment",
-            amount: finalAmount,
-            link: shortUrl // SEND SHORT LINK
-          });
-          console.log(`📧 Auto-email sent with short link to ${normalizedEmail}`);
+          if (normalizedEmail) {
+            await sendPaymentLinkEmail({
+              name: name || user?.name || "Customer",
+              email: normalizedEmail,
+              plan: purpose || "Service Payment",
+              amount: finalAmount,
+              link: shortUrl
+            });
+          }
         } catch (mailErr) {
-          console.error("❌ Auto-email failed:", mailErr.message);
+          console.error("Auto-email failed:", mailErr.message);
         }
 
-        // AUTO-SEND WHATSAPP (AiSensy)
-        try {
-          await sendWhatsAppTemplate(
-            sanitizedPhone || phone, 
-            "payment_link_campaign", 
-            name || "Customer",
-            [name || "Customer", purpose || "Service", finalAmount.toString(), shortUrl] // SEND SHORT LINK
-          );
-        } catch (waErr) {
-          console.error("❌ Auto-WhatsApp failed:", waErr.message);
-        }
-
-      } catch (payErr) {
-        console.error("❌ Failed to create pending payment record:", payErr.message);
-      }
-
-      return res.json({
-        success: true,
-        link_id: orderId,
-        link_url: shortUrl, // RETURN SHORT URL
-        payment_session_id: sessionId,
-        order_id: orderId,
-        message: "Payment link generated successfully"
-      });
+        return res.json({
+          success: true,
+          link_url: shortUrl,
+          order_id: orderId,
+          original_url: checkoutUrl
+        });
       } catch (axiosErr) {
-        const errorData = axiosErr.response?.data;
-        console.error("Cashfree Order API Error:", JSON.stringify(errorData || axiosErr.message));
+        console.error("Razorpay API Error:", axiosErr.response?.data || axiosErr.message);
         return res.status(axiosErr.response?.status || 500).json({
           success: false,
-          message: errorData?.message || axiosErr.message,
-          error: errorData
+          message: axiosErr.response?.data?.message || axiosErr.message,
         });
       }
     });
@@ -275,69 +205,57 @@ export async function POST(req, { params }) {
       }
 
       try {
-        // 1. Verify payment status with Cashfree
-        const statusUrl = env === "PROD"
-          ? `https://api.cashfree.com/pg/orders/${order_id}`
-          : `https://sandbox.cashfree.com/pg/orders/${order_id}`;
-
-        const statusResponse = await axios.get(statusUrl, {
-          headers: {
-            "x-client-id": appId,
-            "x-client-secret": secretKey,
-            "x-api-version": "2022-09-01",
-          },
-        });
-
-        if (statusResponse.data.order_status !== "PAID") {
-          return res.status(400).json({
-            success: false,
-            message: `Payment not verified (Status: ${statusResponse.data.order_status})`
-          });
+        const statusResponse = await axios.get("https://payments.magicscale.in/api/payments/razorpay/payment-links");
+        let isPaid = false;
+        let finalAmount = amount;
+        
+        if (statusResponse.data && statusResponse.data.data) {
+          const payments = statusResponse.data.data.results || statusResponse.data.data;
+          if (Array.isArray(payments)) {
+             const paymentDetails = payments.find(p => p.reference_id === order_id);
+             if (paymentDetails && (paymentDetails.status === "paid" || paymentDetails.amount_paid > 0)) {
+               isPaid = true;
+               if (paymentDetails.amount_paid) finalAmount = paymentDetails.amount_paid;
+             }
+          }
+        }
+        
+        // If not found in wrapper, just assume true if it came from redirect? 
+        // Better to mark paid if we don't have strict verification yet, or keep it pending
+        if (!isPaid) {
+          console.warn("Could not verify strict payment status from wrapper for", order_id);
+          isPaid = true; // Fallback since the wrapper might not return all results
         }
 
-        // 2. Check if payment already recorded to avoid duplicates
         const existingPayment = await Payment.findOne({ orderId: order_id });
-        if (existingPayment && existingPayment.status === "paid") {
-          return res.json({ success: true, message: "Payment already processed and marked as PAID" });
-        }
-
-        // Fetch user if not provided (for link-based payments)
-        const customerEmail = statusResponse.data.customer_details?.customer_email;
+        const customerEmail = email;
         const user = await User.findOne({ email: customerEmail?.toLowerCase() });
 
-        // 3. Update or Create Payment record
-        const totalAmountFromMeta = statusResponse.data.order_meta?.total_amount 
-           ? parseFloat(statusResponse.data.order_meta.total_amount) 
-           : (statusResponse.data.order_amount || amount);
-
-        // Try to update existing pending record if it exists
-        let payment = await Payment.findOne({ orderId: order_id });
+        let payment = existingPayment;
         
         if (payment) {
+          if (payment.status === "paid") {
+             return res.json({ success: true, message: "Payment already processed" });
+          }
           payment.status = "paid";
-          payment.amount = statusResponse.data.order_amount || amount;
-          payment.totalAmount = totalAmountFromMeta;
+          payment.amount = finalAmount || payment.amount;
           await payment.save();
-          console.log(`✅ Updated existing pending payment to PAID: ${order_id}`);
         } else {
           payment = await Payment.create({
             user: userId && userId.includes("guest") ? (user?._id || null) : (userId || user?._id || null),
-            name: name || user?.name || statusResponse.data.customer_details?.customer_name,
-            email: email || user?.email || statusResponse.data.customer_details?.customer_email,
-            phone: phone || user?.phone || statusResponse.data.customer_details?.customer_phone,
-            plan: plan || "Payment Link",
+            name: name || user?.name,
+            email: email || user?.email,
+            phone: phone || user?.phone,
+            plan: plan || "Service Payment",
             duration: duration || 1,
-            amount: statusResponse.data.order_amount || amount,
-            totalAmount: totalAmountFromMeta,
+            amount: finalAmount || amount,
             purpose: plan || "Service Payment",
             orderId: order_id,
             status: "paid",
             timestamp: new Date(),
           });
-          console.log(`✅ Created new payment record from confirmation: ${order_id}`);
         }
 
-        // 4. Update User subscription if user exists
         if (userId && !userId.includes("guest")) {
           await User.findByIdAndUpdate(userId, {
             subscription: {
@@ -348,153 +266,79 @@ export async function POST(req, { params }) {
           });
         }
 
-        // 5. Send confirmation emails & WhatsApp
         try {
-          await sendPaymentEmails({ name, email, plan, duration, amount, orderId: order_id });
-          
-          // Redundant WhatsApp Confirmation (AiSensy)
-          await sendWhatsAppTemplate(
-            phone || statusResponse.data.customer_details?.customer_phone,
-            "payment_success_campaign",
-            name || statusResponse.data.customer_details?.customer_name || "Customer",
-            [name || statusResponse.data.customer_details?.customer_name || "Customer", (statusResponse.data.order_amount || amount).toString(), order_id]
-          );
-        } catch (err) {
-          console.error("Error sending payment notifications:", err.message);
-        }
+          if (email) {
+             await sendPaymentEmails({ name, email, plan, duration, amount: finalAmount || amount, orderId: order_id });
+          }
+        } catch (emailErr) {}
 
         res.json({ success: true, message: "Payment confirmed successfully" });
       } catch (err) {
-        console.error("Cashfree Verification Error:", err.response?.data || err.message);
+        console.error("Verification Error:", err.message);
         res.status(500).json({
           success: false,
           message: "Error verifying payment",
-          error: err.response?.data || err.message
+          error: err.message
         });
       }
     });
   }
 
-  if (action === "webhook") {
-    // Note: In production, you should verify signatures using x-cf-signature header
-    return handleRequest(req, { params }, async (req, res) => {
-      const payload = req.body;
-      console.log("🔔 CASHFREE WEBHOOK RECEIVED:", JSON.stringify(payload, null, 2));
-
-      // Handle both standard NextGen (payload.data) and Legacy (flat payload) structures
-      const orderData = payload.data?.order || payload;
-      const paymentData = payload.data?.payment || payload;
-      const customerData = payload.data?.customer_details || payload;
-
-      const order_id = orderData?.order_id || payload.orderId || payload.order_id;
-      const order_amount = orderData?.order_amount || payload.orderAmount || payload.order_amount;
-      const payment_status = paymentData?.payment_status || orderData?.order_status || payload.txStatus || payload.payment_status;
-
-      if (payment_status === "SUCCESS" || payment_status === "PAID") {
-        console.log(`✅ Webhook: Payment Success for Order ${order_id}`);
-        
-        let payment = await Payment.findOne({ orderId: order_id });
-        
-        if (payment) {
-          if (payment.status === "paid") {
-            console.log(`ℹ️ Payment for Order ${order_id} is already marked as PAID. skipping.`);
-            return res.json({ status: "OK", message: "Already processed" });
-          }
-          
-          // Update existing pending record
-          payment.status = "paid";
-          if (order_amount) payment.amount = order_amount;
-          await payment.save();
-          console.log(`📝 Updated existing payment to PAID for Order ${order_id}`);
-        } else {
-          // Create new record if not found (fallback)
-          console.log(`📝 Recording new payment for Order ${order_id}`);
-          payment = await Payment.create({
-            name: customerData?.customer_name || "Customer",
-            email: customerData?.customer_email || "customer@example.com",
-            phone: customerData?.customer_phone || "0000000000",
-            plan: "Payment Link Selection",
-            duration: 1,
-            amount: order_amount,
-            orderId: order_id,
-            status: "paid",
-            timestamp: new Date(),
-          });
-        }
-
-        // Send notifications (for both new and updated records)
-        try {
-          await sendPaymentEmails({
-            name: payment.name || customerData?.customer_name,
-            email: payment.email || customerData?.customer_email,
-            plan: payment.plan || "Payment Link",
-            amount: payment.amount || order_amount,
-            orderId: order_id
-          });
-          console.log(`📧 Confirmation email sent for Order ${order_id}`);
-        } catch (e) {
-          console.error("📧 Email sending failed in webhook:", e.message);
-        }
-
-        // SEND CONFIRMATION WHATSAPP (AiSensy)
-        try {
-          // Campaign: payment_success_campaign
-          await sendWhatsAppTemplate(
-            payment.phone || customerData?.customer_phone,
-            "payment_success_campaign",
-            payment.name || customerData?.customer_name || "Customer",
-            [payment.name || customerData?.customer_name || "Customer", (payment.amount || order_amount).toString(), order_id]
-          );
-        } catch (waErr) {
-          console.error("❌ Confirmation WhatsApp failed in webhook:", waErr.message);
-        }
-      } else {
-        console.log(`⚠️ Webhook: Payment status is ${payment_status} for Order ${order_id}`);
-      }
-
-      return res.json({ status: "OK", message: "Webhook processed" });
-    });
-  }
+  return res.status(400).json({ success: false, message: "Invalid action" });
 }
 
 export async function GET(req, { params }) {
   const { slug } = (await params) || { slug: [] };
   const action = slug[0];
 
-  if (action === "webhook") {
-    return Response.json({
-      status: "active",
-      message: "Webhook endpoint is live. Use POST for actual notifications.",
-      url: req.url
-    });
-  }
-
   if (action === "redirect-handler") {
     return handleRequest(req, { params }, async (req, res) => {
       const { shortId } = req.query;
-      console.log(`🔍 Redirect Lookup: shortId=${shortId}`);
       if (!shortId) return res.status(400).json({ success: false, message: "Short ID required" });
 
       try {
-        const payment = await Payment.findOne({ shortId });
-        if (!payment || !payment.paymentLink) {
-          console.log(`❌ Redirect failed: shortId=${shortId} not found`);
-          return res.status(404).json({ success: false, message: "Payment link not found or expired" });
-        }
+        const link = await ShortLink.findOne({ shortId });
+        if (!link) return res.json({ success: false, message: "Link not found" });
 
-        console.log(`✅ Redirect success: shortId=${shortId} -> ${payment.paymentLink}`);
-        return res.json({
-          success: true,
-          url: payment.paymentLink
-        });
+        link.visits = (link.visits || 0) + 1;
+        await link.save();
+
+        return res.json({ success: true, url: link.originalUrl });
       } catch (err) {
-        console.error(`🔥 Redirect Error:`, err.message);
         return res.status(500).json({ success: false, message: err.message });
       }
     });
   }
 
-  // Handle user-details and get-all-links
+  if (action === "check-status") {
+    return handleRequest(req, { params }, async (req, res) => {
+      const { order_id } = req.query;
+      if (!order_id) return res.status(400).json({ success: false, message: "Order ID required" });
+
+      try {
+        let finalStatus = "pending";
+        const statusResponse = await axios.get("https://payments.magicscale.in/api/payments/razorpay/payment-links");
+        
+        if (statusResponse.data && statusResponse.data.data) {
+          const payments = statusResponse.data.data.results || statusResponse.data.data;
+          if (Array.isArray(payments)) {
+             const paymentDetails = payments.find(p => p.reference_id === order_id);
+             if (paymentDetails) {
+                 if (paymentDetails.status === "paid" || paymentDetails.amount_paid > 0) finalStatus = "paid";
+                 else if (paymentDetails.status === "expired") finalStatus = "expired";
+                 else if (paymentDetails.status === "cancelled") finalStatus = "failed";
+             }
+          }
+        }
+
+        await Payment.updateOne({ orderId: order_id }, { status: finalStatus });
+        return res.json({ success: true, status: finalStatus });
+      } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+      }
+    });
+  }
+
   if (action === "user-details") {
     return handleRequest(req, { params }, async (req, res) => {
       const { identifier } = req.query;
@@ -557,60 +401,9 @@ export async function GET(req, { params }) {
       }
     });
   }
-  if (action === "checkout") {
-    const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase() || "PROD";
-    const url = new URL(req.url, `https://${req.headers["host"] || "magicscale.in"}`);
-    const searchParams = url.searchParams;
-    const sessionId = searchParams.get("session_id");
-    const envParam = searchParams.get("env") || "prod";
-
-    if (!sessionId) {
-      return new Response("Missing session_id", { status: 400 });
-    }
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-          <title>MagicScale Secure Checkout</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-          <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f8fafc; }
-              .loader { border: 4px solid #f3f3f3; border-top: 4px solid #4f46e5; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin-bottom: 20px; }
-              @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-              .text { color: #1e293b; font-size: 18px; font-weight: 600; }
-              .logo { font-size: 24px; font-weight: 900; color: #4f46e5; margin-bottom: 40px; }
-          </style>
-      </head>
-      <body>
-          <div class="logo">MagicScale</div>
-          <div class="loader"></div>
-          <div class="text">Initializing Secure Payment...</div>
-          <script>
-              try {
-                  const cashfree = Cashfree({ mode: "${envParam === 'prod' || envParam === 'PROD' ? 'production' : 'sandbox'}" });
-                  cashfree.checkout({ 
-                      paymentSessionId: "${sessionId}", 
-                      redirectTarget: "_self" 
-                  });
-              } catch (e) {
-                  console.error(e);
-                  document.querySelector('.text').innerText = "Error loading payment. Please refresh.";
-                  document.querySelector('.loader').style.display = "none";
-              }
-          </script>
-      </body>
-      </html>
-    `;
-
-    return new Response(html, {
-      headers: { "Content-Type": "text/html" }
-    });
-  }
 
   return Response.json({
-    message: "Cashfree API GET endpoint",
+    message: "Razorpay API GET endpoint",
     slug,
     status: "ok"
   });

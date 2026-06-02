@@ -139,7 +139,7 @@ export async function POST(req, { params }) {
         if (!checkoutUrl) throw new Error("Failed to get payment link from Razorpay");
 
         const shortId = crypto.randomBytes(3).toString("hex");
-        const origin = req.headers["host"] ? `https://${req.headers["host"]}` : "https://magicscale.in";
+        const origin = req.headers.origin || process.env.NEXT_PUBLIC_BASE_URL || "https://magicscale.in";
         const shortUrl = `${origin}/p/${shortId}`;
 
         await ShortLink.create({

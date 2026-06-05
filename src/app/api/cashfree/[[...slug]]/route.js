@@ -236,19 +236,25 @@ export async function POST(req, { params }) {
         if (payment) {
           if (payment.status === "paid") {
              return res.json({ success: true, message: "Payment already processed" });
+        if (existingPayment) {
+          console.log(`ℹ️ Payment for Order ${order_id} already exists. Updating status to paid.`);
+          if (existingPayment.status !== "paid") {
+            existingPayment.status = "paid";
+            if (order_amount) existingPayment.amount = order_amount;
+            await existingPayment.save();
+            console.log(`✅ Webhook: Updated Order ${order_id} to paid.`);
+          } else {
+            console.log(`ℹ️ Order ${order_id} is already marked paid.`);
           }
-          payment.status = "paid";
-          payment.amount = finalAmount || payment.amount;
-          await payment.save();
         } else {
-          payment = await Payment.create({
+          await Payment.create({
             user: userId && userId.includes("guest") ? (user?._id || null) : (userId || user?._id || null),
             name: name || user?.name,
             email: email || user?.email,
             phone: phone || user?.phone,
             plan: plan || "Service Payment",
             duration: duration || 1,
-            amount: finalAmount || amount,
+            amount: order_amount || amount,
             purpose: plan || "Service Payment",
             orderId: order_id,
             status: "paid",
@@ -268,7 +274,7 @@ export async function POST(req, { params }) {
 
         try {
           if (email) {
-             await sendPaymentEmails({ name, email, plan, duration, amount: finalAmount || amount, orderId: order_id });
+             await sendPaymentEmails({ name, email, plan, duration, amount: order_amount || amount, orderId: order_id });
           }
         } catch (emailErr) {}
 
@@ -315,30 +321,58 @@ export async function GET(req, { params }) {
       const { order_id } = req.query;
       if (!order_id) return res.status(400).json({ success: false, message: "Order ID required" });
 
+      const appId = process.env.CASHFREE_APP_ID?.trim();
+      const secretKey = process.env.CASHFREE_SECRET_KEY?.trim();
+      const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase() || "PROD";
+
       try {
-        let finalStatus = "pending";
-        const statusResponse = await axios.get("https://payments.magicscale.in/api/payments/razorpay/payment-links");
-        
-        if (statusResponse.data && statusResponse.data.data) {
-          const payments = statusResponse.data.data.results || statusResponse.data.data;
-          if (Array.isArray(payments)) {
-             const paymentDetails = payments.find(p => p.reference_id === order_id);
-             if (paymentDetails) {
-                 if (paymentDetails.status === "paid" || paymentDetails.amount_paid > 0) finalStatus = "paid";
-                 else if (paymentDetails.status === "expired") finalStatus = "expired";
-                 else if (paymentDetails.status === "cancelled") finalStatus = "failed";
-             }
-          }
+        const fetchStatus = async (targetEnv) => {
+          const url = targetEnv === "PROD" 
+            ? `https://api.cashfree.com/pg/orders/${order_id}` 
+            : `https://sandbox.cashfree.com/pg/orders/${order_id}`;
+          
+          return axios.get(url, {
+            headers: {
+              "x-client-id": appId,
+              "x-client-secret": secretKey,
+              "x-api-version": "2022-09-01",
+            },
+          });
+        };
+
+        let orderResponse;
+        try {
+          orderResponse = await fetchStatus(env);
+        } catch (err) {
+          const alternateEnv = env === "PROD" ? "TEST" : "PROD";
+          orderResponse = await fetchStatus(alternateEnv);
         }
 
-        await Payment.updateOne({ orderId: order_id }, { status: finalStatus });
+        const cashfreeStatus = orderResponse.data.order_status?.toUpperCase(); 
+        let finalStatus = "pending";
+        if (cashfreeStatus === "PAID" || cashfreeStatus === "SUCCESS") finalStatus = "paid";
+        else if (cashfreeStatus === "EXPIRED") finalStatus = "expired";
+        else if (cashfreeStatus === "TERMINATED" || cashfreeStatus === "FAILED") finalStatus = "failed";
+
+        const payment = await Payment.findOne({ orderId: order_id });
+        if (payment && payment.status !== finalStatus) {
+          payment.status = finalStatus;
+          await payment.save();
+        }
+
         return res.json({ success: true, status: finalStatus });
       } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.error("Cashfree Status Error:", error.response?.data || error.message);
+        const payment = await Payment.findOne({ orderId: order_id });
+        if (payment) {
+           return res.json({ success: true, status: payment.status });
+        }
+        return res.status(500).json({ success: false, message: "Error verifying payment" });
       }
     });
   }
 
+  // Handle user-details and get-all-links
   if (action === "user-details") {
     return handleRequest(req, { params }, async (req, res) => {
       const { identifier } = req.query;

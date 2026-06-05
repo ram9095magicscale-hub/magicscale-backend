@@ -319,54 +319,77 @@ export async function GET(req, { params }) {
       const { order_id } = req.query;
       if (!order_id) return res.status(400).json({ success: false, message: "Order ID required" });
 
+      let finalStatus = "pending";
+
+      // 1. Check Cashfree first
       const appId = process.env.CASHFREE_APP_ID?.trim();
       const secretKey = process.env.CASHFREE_SECRET_KEY?.trim();
       const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase() || "PROD";
 
-      try {
-        const fetchStatus = async (targetEnv) => {
-          const url = targetEnv === "PROD" 
-            ? `https://api.cashfree.com/pg/orders/${order_id}` 
-            : `https://sandbox.cashfree.com/pg/orders/${order_id}`;
-          
-          return axios.get(url, {
-            headers: {
-              "x-client-id": appId,
-              "x-client-secret": secretKey,
-              "x-api-version": "2022-09-01",
-            },
-          });
-        };
-
-        let orderResponse;
+      if (appId && secretKey) {
         try {
-          orderResponse = await fetchStatus(env);
-        } catch (err) {
-          const alternateEnv = env === "PROD" ? "TEST" : "PROD";
-          orderResponse = await fetchStatus(alternateEnv);
+          const fetchStatus = async (targetEnv) => {
+            const url = targetEnv === "PROD" 
+              ? `https://api.cashfree.com/pg/orders/${order_id}` 
+              : `https://sandbox.cashfree.com/pg/orders/${order_id}`;
+            return axios.get(url, {
+              headers: {
+                "x-client-id": appId,
+                "x-client-secret": secretKey,
+                "x-api-version": "2022-09-01",
+              },
+            });
+          };
+
+          let orderResponse;
+          try {
+            orderResponse = await fetchStatus(env);
+          } catch (err) {
+            const alternateEnv = env === "PROD" ? "TEST" : "PROD";
+            orderResponse = await fetchStatus(alternateEnv);
+          }
+
+          const cashfreeStatus = orderResponse.data.order_status?.toUpperCase(); 
+          if (cashfreeStatus === "PAID" || cashfreeStatus === "SUCCESS") finalStatus = "paid";
+          else if (cashfreeStatus === "EXPIRED") finalStatus = "expired";
+          else if (cashfreeStatus === "TERMINATED" || cashfreeStatus === "FAILED") finalStatus = "failed";
+        } catch (error) {
+          console.error("Cashfree Status Error:", error.response?.data || error.message);
         }
+      }
 
-        const cashfreeStatus = orderResponse.data.order_status?.toUpperCase(); 
-        let finalStatus = "pending";
-        if (cashfreeStatus === "PAID" || cashfreeStatus === "SUCCESS") finalStatus = "paid";
-        else if (cashfreeStatus === "EXPIRED") finalStatus = "expired";
-        else if (cashfreeStatus === "TERMINATED" || cashfreeStatus === "FAILED") finalStatus = "failed";
+      // 2. Check Razorpay (Fallback or primary if Cashfree didn't work)
+      if (finalStatus === "pending") {
+        try {
+          const statusResponse = await axios.get("https://payments.magicscale.in/api/payments/razorpay/payment-links");
+          if (statusResponse.data && statusResponse.data.data) {
+            const payments = statusResponse.data.data.results || statusResponse.data.data;
+            if (Array.isArray(payments)) {
+               const paymentDetails = payments.find(p => p.reference_id === order_id);
+               if (paymentDetails) {
+                   if (paymentDetails.status === "paid" || paymentDetails.amount_paid > 0) finalStatus = "paid";
+                   else if (paymentDetails.status === "expired") finalStatus = "expired";
+                   else if (paymentDetails.status === "cancelled") finalStatus = "failed";
+               }
+            }
+          }
+        } catch (rpError) {
+          console.error("Razorpay Status Error:", rpError.message);
+        }
+      }
 
+      // Update local DB
+      try {
         const payment = await Payment.findOne({ orderId: order_id });
         if (payment && payment.status !== finalStatus) {
           payment.status = finalStatus;
           await payment.save();
         }
-
-        return res.json({ success: true, status: finalStatus });
-      } catch (error) {
-        console.error("Cashfree Status Error:", error.response?.data || error.message);
-        const payment = await Payment.findOne({ orderId: order_id });
-        if (payment) {
-           return res.json({ success: true, status: payment.status });
-        }
-        return res.status(500).json({ success: false, message: "Error verifying payment" });
+      } catch (dbError) {
+        console.error("DB Update Error:", dbError.message);
       }
+
+      return res.json({ success: true, status: finalStatus });
     });
   }
 

@@ -363,7 +363,7 @@ export async function GET(req, { params }) {
         try {
           const statusResponse = await axios.get("https://payments.magicscale.in/api/payments/razorpay/payment-links");
           if (statusResponse.data && statusResponse.data.data) {
-            const payments = statusResponse.data.data.results || statusResponse.data.data;
+            const payments = statusResponse.data.data.payment_links || statusResponse.data.data.results || statusResponse.data.data;
             if (Array.isArray(payments)) {
                const paymentDetails = payments.find(p => p.reference_id === order_id);
                if (paymentDetails) {

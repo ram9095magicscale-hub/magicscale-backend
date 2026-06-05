@@ -236,30 +236,28 @@ export async function POST(req, { params }) {
         if (payment) {
           if (payment.status === "paid") {
              return res.json({ success: true, message: "Payment already processed" });
-        if (existingPayment) {
-          console.log(`ℹ️ Payment for Order ${order_id} already exists. Updating status to paid.`);
-          if (existingPayment.status !== "paid") {
-            existingPayment.status = "paid";
-            if (order_amount) existingPayment.amount = order_amount;
-            await existingPayment.save();
-            console.log(`✅ Webhook: Updated Order ${order_id} to paid.`);
-          } else {
-            console.log(`ℹ️ Order ${order_id} is already marked paid.`);
           }
+          payment.status = "paid";
+          payment.amount = statusResponse.data.order_amount || amount;
+          payment.totalAmount = totalAmountFromMeta;
+          await payment.save();
+          console.log(`✅ Updated existing pending payment to PAID: ${order_id}`);
         } else {
-          await Payment.create({
+          payment = await Payment.create({
             user: userId && userId.includes("guest") ? (user?._id || null) : (userId || user?._id || null),
-            name: name || user?.name,
-            email: email || user?.email,
-            phone: phone || user?.phone,
-            plan: plan || "Service Payment",
+            name: name || user?.name || statusResponse.data.customer_details?.customer_name,
+            email: email || user?.email || statusResponse.data.customer_details?.customer_email,
+            phone: phone || user?.phone || statusResponse.data.customer_details?.customer_phone,
+            plan: plan || "Payment Link",
             duration: duration || 1,
-            amount: order_amount || amount,
+            amount: statusResponse.data.order_amount || amount,
+            totalAmount: totalAmountFromMeta,
             purpose: plan || "Service Payment",
             orderId: order_id,
             status: "paid",
             timestamp: new Date(),
           });
+          console.log(`✅ Created new payment record from confirmation: ${order_id}`);
         }
 
         if (userId && !userId.includes("guest")) {

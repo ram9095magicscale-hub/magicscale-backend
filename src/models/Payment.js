@@ -15,6 +15,7 @@ const paymentSchema = new mongoose.Schema({
   orderId: { type: String, required: true },
   paymentLink: { type: String }, // Store the generated link
   status: { type: String, default: "pending" },
+  gateway: { type: String }, // Store the gateway name (cashfree, razorpay)
   shortId: { type: String, unique: true, sparse: true },
   timestamp: { type: Date, default: Date.now },
   lastReminderAt: { type: Date },

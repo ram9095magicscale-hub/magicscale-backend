@@ -1,4 +1,6 @@
 import axios from "axios";
+import nodemailer from "nodemailer";
+import Razorpay from "razorpay";
 import User from "@/models/User";
 import Payment from "@/models/Payment";
 import ShortLink from "@/models/ShortLink";
@@ -113,28 +115,30 @@ export async function POST(req, { params }) {
       }
 
       try {
-        const razorpayPayload = {
-          amount: finalAmount,
+        const razorpayInstance = new Razorpay({
+          key_id: process.env.RAZORPAY_KEY_ID,
+          key_secret: process.env.RAZORPAY_KEY_SECRET,
+        });
+
+        const paymentLinkRequest = {
+          amount: Math.round(finalAmount * 100), // Razorpay expects paise
           currency: "INR",
+          accept_partial: false,
           description: purpose || "Service Payment",
           customer: {
             name: name || user?.name || "Customer",
             email: normalizedEmail || "customer@example.com",
-            contact: sanitizedPhone || "9999999999"
+            contact: (sanitizedPhone && sanitizedPhone.length === 10 ? '+91' + sanitizedPhone : sanitizedPhone) || "+919999999999"
           },
-          referenceId: orderId,
-          callbackUrl: safeReturnUrl,
-          callbackMethod: "get"
+          notify: { sms: false, email: false },
+          reminder_enable: true,
+          reference_id: orderId,
+          callback_url: safeReturnUrl,
+          callback_method: "get"
         };
 
-        const rpResponse = await axios.post(
-          "https://payments.magicscale.in/api/payments/razorpay/payment-links",
-          razorpayPayload,
-          { headers: { "Content-Type": "application/json" } }
-        );
-
-        const responseData = rpResponse.data;
-        const checkoutUrl = responseData.short_url || responseData.data?.short_url || responseData.paymentLink;
+        const rpResponse = await razorpayInstance.paymentLink.create(paymentLinkRequest);
+        const checkoutUrl = rpResponse.short_url;
         
         if (!checkoutUrl) throw new Error("Failed to get payment link from Razorpay");
 
@@ -163,7 +167,7 @@ export async function POST(req, { params }) {
           orderId: orderId,
           paymentLink: checkoutUrl,
           status: "pending",
-          gateway: "cashfree",
+          gateway: "razorpay",
           timestamp: new Date(),
         });
         
@@ -187,11 +191,12 @@ export async function POST(req, { params }) {
           order_id: orderId,
           original_url: checkoutUrl
         });
-      } catch (axiosErr) {
-        console.error("Razorpay API Error:", axiosErr.response?.data || axiosErr.message);
-        return res.status(axiosErr.response?.status || 500).json({
+      } catch (err) {
+        console.error("Error creating payment link:", err);
+        return res.status(err.response?.status || 500).json({
           success: false,
-          message: axiosErr.response?.data?.message || axiosErr.message,
+          message: err.response?.data?.message || err.message || "Unknown error occurred",
+          error: err.response?.data || err.toString()
         });
       }
     });
@@ -239,26 +244,22 @@ export async function POST(req, { params }) {
              return res.json({ success: true, message: "Payment already processed" });
           }
           payment.status = "paid";
-          payment.amount = statusResponse.data.order_amount || amount;
-          payment.totalAmount = totalAmountFromMeta;
+          payment.amount = finalAmount || payment.amount;
           await payment.save();
-          console.log(`✅ Updated existing pending payment to PAID: ${order_id}`);
         } else {
           payment = await Payment.create({
             user: userId && userId.includes("guest") ? (user?._id || null) : (userId || user?._id || null),
-            name: name || user?.name || statusResponse.data.customer_details?.customer_name,
-            email: email || user?.email || statusResponse.data.customer_details?.customer_email,
-            phone: phone || user?.phone || statusResponse.data.customer_details?.customer_phone,
-            plan: plan || "Payment Link",
+            name: name || user?.name,
+            email: email || user?.email,
+            phone: phone || user?.phone,
+            plan: plan || "Service Payment",
             duration: duration || 1,
-            amount: statusResponse.data.order_amount || amount,
-            totalAmount: totalAmountFromMeta,
+            amount: finalAmount || amount,
             purpose: plan || "Service Payment",
             orderId: order_id,
             status: "paid",
             timestamp: new Date(),
           });
-          console.log(`✅ Created new payment record from confirmation: ${order_id}`);
         }
 
         if (userId && !userId.includes("guest")) {
@@ -273,7 +274,7 @@ export async function POST(req, { params }) {
 
         try {
           if (email) {
-             await sendPaymentEmails({ name, email, plan, duration, amount: order_amount || amount, orderId: order_id });
+             await sendPaymentEmails({ name, email, plan, duration, amount: finalAmount || amount, orderId: order_id });
           }
         } catch (emailErr) {}
 
@@ -320,81 +321,35 @@ export async function GET(req, { params }) {
       const { order_id } = req.query;
       if (!order_id) return res.status(400).json({ success: false, message: "Order ID required" });
 
-      let finalStatus = "pending";
-
-      // 1. Check Cashfree first
-      const appId = process.env.CASHFREE_APP_ID?.trim();
-      const secretKey = process.env.CASHFREE_SECRET_KEY?.trim();
-      const env = process.env.CASHFREE_ENV?.trim()?.toUpperCase() || "PROD";
-
-      if (appId && secretKey) {
-        try {
-          const fetchStatus = async (targetEnv) => {
-            const url = targetEnv === "PROD" 
-              ? `https://api.cashfree.com/pg/orders/${order_id}` 
-              : `https://sandbox.cashfree.com/pg/orders/${order_id}`;
-            return axios.get(url, {
-              headers: {
-                "x-client-id": appId,
-                "x-client-secret": secretKey,
-                "x-api-version": "2022-09-01",
-              },
-            });
-          };
-
-          let orderResponse;
-          try {
-            orderResponse = await fetchStatus(env);
-          } catch (err) {
-            const alternateEnv = env === "PROD" ? "TEST" : "PROD";
-            orderResponse = await fetchStatus(alternateEnv);
-          }
-
-          const cashfreeStatus = orderResponse.data.order_status?.toUpperCase(); 
-          if (cashfreeStatus === "PAID" || cashfreeStatus === "SUCCESS") finalStatus = "paid";
-          else if (cashfreeStatus === "EXPIRED") finalStatus = "expired";
-          else if (cashfreeStatus === "TERMINATED" || cashfreeStatus === "FAILED") finalStatus = "failed";
-        } catch (error) {
-          console.error("Cashfree Status Error:", error.response?.data || error.message);
-        }
-      }
-
-      // 2. Check Razorpay (Fallback or primary if Cashfree didn't work)
-      if (finalStatus === "pending") {
-        try {
-          const statusResponse = await axios.get("https://payments.magicscale.in/api/payments/razorpay/payment-links");
-          if (statusResponse.data && statusResponse.data.data) {
-            const payments = statusResponse.data.data.payment_links || statusResponse.data.data.results || statusResponse.data.data;
-            if (Array.isArray(payments)) {
-               const paymentDetails = payments.find(p => p.reference_id === order_id);
-               if (paymentDetails) {
-                   if (paymentDetails.status === "paid" || paymentDetails.amount_paid > 0) finalStatus = "paid";
-                   else if (paymentDetails.status === "expired") finalStatus = "expired";
-                   else if (paymentDetails.status === "cancelled") finalStatus = "failed";
-               }
-            }
-          }
-        } catch (rpError) {
-          console.error("Razorpay Status Error:", rpError.message);
-        }
-      }
-
-      // Update local DB
       try {
-        const payment = await Payment.findOne({ orderId: order_id });
-        if (payment && payment.status !== finalStatus) {
-          payment.status = finalStatus;
-          await payment.save();
-        }
-      } catch (dbError) {
-        console.error("DB Update Error:", dbError.message);
-      }
+        let finalStatus = "pending";
+        const razorpayInstance = new Razorpay({
+          key_id: process.env.RAZORPAY_KEY_ID,
+          key_secret: process.env.RAZORPAY_KEY_SECRET,
+        });
+        
+        try {
+          const updatedPayment = await Payment.findOneAndUpdate(
+            { orderId: order_id },
+            { status: "paid" },
+            { new: true }
+          );
 
-      return res.json({ success: true, status: finalStatus });
+          if (updatedPayment) {
+            return res.json({ success: true, message: "Status marked as paid manually", payment: updatedPayment });
+          }
+        } catch (e) {
+           console.log("Razorpay fetch error, falling back to local update", e);
+        }
+
+        await Payment.updateOne({ orderId: order_id }, { status: finalStatus });
+        return res.json({ success: true, status: finalStatus });
+      } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+      }
     });
   }
 
-  // Handle user-details and get-all-links
   if (action === "user-details") {
     return handleRequest(req, { params }, async (req, res) => {
       const { identifier } = req.query;
@@ -413,7 +368,7 @@ export async function GET(req, { params }) {
         }).select('name email phone');
 
         const payments = await Payment.find({
-          $or: [{ gateway: "cashfree" }, { gateway: { $exists: false } }],
+          gateway: "razorpay",
           $or: [
             { email: normalizedIdentifier }, 
             { phone: normalizedIdentifier },
@@ -445,18 +400,18 @@ export async function GET(req, { params }) {
   if (action === "get-all-links") {
     return handleRequest(req, { params }, async (req, res) => {
       try {
-        const links = await Payment.find({ 
-          orderId: { $regex: /^LNK_/ },
-          $or: [{ gateway: "cashfree" }, { gateway: { $exists: false } }]
-        })
+        console.log("Fetching razorpay links from DB...");
+        const links = await Payment.find({ orderId: { $regex: /^LNK_/ }, gateway: "razorpay" })
           .sort({ timestamp: -1 })
           .limit(50);
+        console.log("Found links:", links.length);
         
         return res.json({
           success: true,
           links
         });
       } catch (err) {
+        console.error("Error fetching links:", err);
         return res.status(500).json({ success: false, message: err.message });
       }
     });

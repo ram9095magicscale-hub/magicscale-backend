@@ -1,31 +1,28 @@
+import mongoose from "mongoose";
+import dotenv from "dotenv";
 
-import 'dotenv/config';
-import mongoose from 'mongoose';
-import User from './src/models/User.js';
-import Payment from './src/models/Payment.js';
+dotenv.config({ path: ".env.local" });
 
-async function test() {
-  try {
-    const MONGO_URI = process.env.MONGO_URI;
-    if (!MONGO_URI) throw new Error("No MONGO_URI");
-    
-    await mongoose.connect(MONGO_URI);
-    console.log("DB Connected");
-    
-    const userCount = await User.countDocuments();
-    const paymentCount = await Payment.countDocuments();
-    
-    const users = await User.find({}, 'name email role');
-    const payments = await Payment.find();
-    
-    console.log("Stats:", { userCount, paymentCount });
-    console.log("Users:", JSON.stringify(users, null, 2));
-    
-    process.exit(0);
-  } catch (err) {
-    console.error(err);
-    process.exit(1);
-  }
+const paymentSchema = new mongoose.Schema({
+  orderId: { type: String },
+  gateway: { type: String },
+  paymentLink: { type: String },
+  status: { type: String }
+}, { strict: false });
+
+const Payment = mongoose.model("Payment", paymentSchema);
+
+async function check() {
+  await mongoose.connect(process.env.MONGODB_URI);
+  console.log("Connected");
+  const razorpayLinks = await Payment.find({ orderId: { $regex: /^LNK_/ }, gateway: "razorpay" }).sort({ timestamp: -1 }).limit(5);
+  console.log("Links with gateway=razorpay:");
+  console.log(razorpayLinks);
+  
+  const allLinks = await Payment.find({ orderId: { $regex: /^LNK_/ } }).sort({ timestamp: -1 }).limit(5);
+  console.log("All Links:");
+  console.log(allLinks.map(l => ({ orderId: l.orderId, gateway: l.gateway, date: l.timestamp })));
+  
+  process.exit(0);
 }
-
-test();
+check();
